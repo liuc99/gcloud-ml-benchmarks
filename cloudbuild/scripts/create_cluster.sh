@@ -55,8 +55,13 @@ if gcloud container clusters describe "$CLUSTER_NAME" --zone="${_ZONE}" --projec
     fi
     gcloud container node-pools create "${_MACHINE_TYPE}" "${NODE_POOL_ARGS[@]}"
   else
-    echo "--- Node pool ${_MACHINE_TYPE} already exists on cluster ${CLUSTER_NAME}, ensuring size is ${_NODES} ---"
-    gcloud container clusters resize "$CLUSTER_NAME" --node-pool="${_MACHINE_TYPE}" --num-nodes="${_NODES}" --zone="${_ZONE}" --project="${PROJECT_ID}" --quiet || true
+    CURRENT_NODES=$(gcloud container node-pools describe "${_MACHINE_TYPE}" --cluster="$CLUSTER_NAME" --zone="${_ZONE}" --project="${PROJECT_ID}" --format="value(nodeCount)" 2>/dev/null || echo "0")
+    if [ "${CURRENT_NODES}" -lt "${_NODES}" ]; then
+      echo "--- Node pool ${_MACHINE_TYPE} has ${CURRENT_NODES} nodes, scaling UP to ${_NODES} ---"
+      gcloud container clusters resize "$CLUSTER_NAME" --node-pool="${_MACHINE_TYPE}" --num-nodes="${_NODES}" --zone="${_ZONE}" --project="${PROJECT_ID}" --quiet || true
+    else
+      echo "--- Node pool ${_MACHINE_TYPE} currently has ${CURRENT_NODES} nodes (>= required ${_NODES}), skipping resize ---"
+    fi
   fi
 else
   echo "--- Creating GKE cluster: ${CLUSTER_NAME} ---"
