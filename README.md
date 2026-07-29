@@ -17,7 +17,7 @@ This repository measures dataset loading, array I/O, and model checkpointing per
 
 ---
 
-## 📁 Repository Structure
+## 📁 Repository & Documentation Structure
 
 ```
 gcloud-ml-benchmarks/
@@ -32,9 +32,15 @@ gcloud-ml-benchmarks/
 │   │   └── helm_chart/
 │   └── hf-pytorch-lightning-cpu/ # PyTorch Llama 3.1 8B DDP training & checkpoint harness
 │       └── helm_chart/
-└── docs/                        # Benchmark reports & architectural documentation
-    ├── TensorStore_GCSFuse_Benchmark_Report.md
-    └── TensorStore_GCSFuse_Benchmark_Report.html
+└── docs/                        # Step-by-step reproduction guide & test results by dimension
+    ├── README.md                # Documentation index
+    ├── step_by_step_guide.md    # Manual reproduction guide
+    └── results/                 # Test results breakdown by dimension
+        ├── node_scaling.md                # 1 to 32 nodes (up to 1.35 Tbps aggregate read)
+        ├── network_mtu.md                 # 8896 Jumbo Frames vs 1500 MTU
+        ├── client_protocols.md            # HTTP/1.1 vs gRPC protocol comparison
+        ├── chunk_size_and_file_size.md    # 50MB vs 200MB vs 400MB chunk size & slice retrieval
+        └── concurrency_and_mount_tuning.md # Worker scaling & global-max-blocks tuning
 ```
 
 ---
@@ -51,7 +57,13 @@ gcloud builds submit \
   --substitutions=_PROJECT_ID="your-project-id",_ZONE="us-central1-b",_NODES="32",_MACHINE_TYPE="n4-standard-80"
 ```
 
-Refer to [docs/tensorstore_gcsfuse_benchmark_report.md](docs/tensorstore_gcsfuse_benchmark_report.md) for full multi-node results, MTU optimization strategies, and reproduction guides.
+For step-by-step manual setup instructions and detailed tuning metrics:
+- [**Step-by-Step Reproduction Guide**](docs/step_by_step_guide.md)
+- [**Multi-Node Cluster Scaling (1 to 32 Nodes)**](docs/results/node_scaling.md)
+- [**Network MTU Tuning (8896 Jumbo Frames vs 1500 MTU)**](docs/results/network_mtu.md)
+- [**Client Protocols (HTTP/1.1 vs gRPC)**](docs/results/client_protocols.md)
+- [**Zarr Chunk Size & Slicing Latency**](docs/results/chunk_size_and_file_size.md)
+- [**Worker Concurrency & Mount Tuning**](docs/results/concurrency_and_mount_tuning.md)
 
 ### 2. PyTorch + Google Cloud Managed Lustre Benchmark
 
