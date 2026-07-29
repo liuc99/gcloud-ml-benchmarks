@@ -839,6 +839,20 @@ class LoggedModelCheckpoint(ModelCheckpoint):
         if os.getenv("USE_TENSORSTORE", "false").lower() == "true" or os.getenv("CHECKPOINT_FORMAT", "").lower() == "tensorstore":
             self._write_tensorstore_checkpoint(trainer, target_path)
             return
+
+        if target_path.startswith("gs://"):
+            try:
+                from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
+                fs = ExtendedGcsFileSystem()
+                clean_path = target_path[5:]
+                checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
+                with fs.open(clean_path, "wb") as f:
+                    torch.save(checkpoint_dict, f)
+                logging.info("[BENCHMARK] [gcsfs] Saved checkpoint directly via ExtendedGcsFileSystem to %s", target_path)
+                return
+            except Exception as e:
+                logging.warning("[BENCHMARK] [gcsfs] ExtendedGcsFileSystem save failed for %s: %s; falling back to torch.save", target_path, e)
+
         try:
             checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
             torch.save(checkpoint_dict, target_path)
@@ -994,17 +1008,16 @@ class LoggedModelCheckpoint(ModelCheckpoint):
             try:
                 from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
                 fs = ExtendedGcsFileSystem()
-                ts_dir = filepath.replace(".ckpt", ".ts_zarr")
-                clean_path = ts_dir[5:]
-                info_list = fs.find(clean_path, detail=True)
-                if isinstance(info_list, dict):
-                    total_gcs_bytes = sum(v.get("size", 0) for v in info_list.values() if isinstance(v, dict))
-                elif isinstance(info_list, list):
-                    total_gcs_bytes = sum(v.get("size", 0) for v in info_list if isinstance(v, dict))
-                else:
-                    total_gcs_bytes = 0
-                if total_gcs_bytes > 0:
-                    return total_gcs_bytes
+                clean_path = filepath[5:]
+                if fs.exists(clean_path):
+                    return fs.size(clean_path)
+            except Exception:
+                pass
+            try:
+                import fsspec
+                fs, clean_path = fsspec.core.url_to_fs(filepath)
+                if fs.exists(clean_path):
+                    return fs.size(clean_path)
             except Exception:
                 pass
 
@@ -1260,12 +1273,21 @@ def build_strategy(name):
 
 
 if __name__ == "__main__":
+    # ---- Enable ExtendedGcsFileSystem for Zonal/RAPID bucket support in gcsfs ----
+    try:
+        from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
+        fsspec.register_implementation("gs", ExtendedGcsFileSystem, clobber=True)
+        fsspec.register_implementation("gcs", ExtendedGcsFileSystem, clobber=True)
+        logging.info("[BENCHMARK] Registered ExtendedGcsFileSystem for Zonal/RAPID GCS bucket support")
+    except Exception as e:
+        logging.warning("[BENCHMARK] ExtendedGcsFileSystem registration skipped: %s", e)
+
     # ---- Verify gcsfs is the active fsspec backend for "gs" ----------------
     try:
         fs = fsspec.filesystem("gs")
         logging.info("[BENCHMARK] [SYSTEM CHECK] fsspec 'gs' backend class: %s", type(fs))
         logging.info(
-            "[BENCHMARK] [SYSTEM CHECK] If this says 'gcsfs.core.GCSFileSystem', you are using gcsfs."
+            "[BENCHMARK] [SYSTEM CHECK] ExtendedGcsFileSystem provides Zonal/RAPID bucket support."
         )
     except Exception as e:
         logging.info("[BENCHMARK] [SYSTEM CHECK] Failed to load GS filesystem: %s", e)
