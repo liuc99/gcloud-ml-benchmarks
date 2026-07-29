@@ -26,10 +26,15 @@ docs/
 │       ├── network_mtu.md              # 8896 Jumbo Frames vs 1500 MTU
 │       ├── client_protocols.md         # HTTP/1.1 vs gRPC protocol comparison
 │       ├── chunk_size_and_file_size.md # 50MB vs 200MB vs 400MB chunk size & slice retrieval
-│       └── concurrency_and_mount_tuning.md # Worker scaling & global-max-blocks tuning
+│       ├── global_max_blocks.md        # GCSFuse memory block buffer tuning (write:global-max-blocks)
+│       ├── process_concurrency.md      # Worker process concurrency scaling (1 vs 4 vs 8 processes)
+│       └── thread_concurrency.md       # Application I/O thread concurrency scaling
 │
 └── pytorch/                            # PyTorch + Storage benchmark suite
     ├── README.md                       # PyTorch documentation index
     ├── step_by_step_guide.md           # Reproduction guide for Managed Lustre, GCSFuse & gcsfs
     └── results/                        # Test results across storage backends
+        ├── storage_backends.md         # Managed Lustre vs GCSFuse vs Direct GCS (gcsfs)
+        ├── checkpoint_performance.md   # Checkpoint pickling & network upload throughput
+        └── rank_scaling_and_memory.md  # Rank topology & RAM OOM prevention
 ```
