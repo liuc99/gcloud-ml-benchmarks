@@ -1,0 +1,95 @@
+# Default values for the gcsfs-only CPU emulator.
+# 2 c4-standard-192 nodes x 4 procs per node = 8 ranks.
+#
+# Why 4 ranks/node (not 8): when the run restores a checkpoint, every DDP rank
+# torch.load's the full ~48GB state (16GB model + 32GB AdamW) while still
+# holding the freshly-initialized model+optimizer, so per-rank peak RSS roughly
+# doubles to ~92GB. 8 ranks/node x 92GB exceeds the 720GB c4-standard-192 and
+# OOMs; 4 ranks/node (4x92 ~ 368GB) fits. This halves world_size from 16 to 8
+# (fewer total ranks -> lower aggregate GCS throughput, but per-rank IO -- the
+# thing under test -- is unchanged).
+
+# Pins workloads to the c4-standard-192 node pool created by the run pipeline.
+nodeSelector:
+  cloud.google.com/gke-nodepool: c4-standard-192
+
+serviceAccount: default
+namespace: default
+workload_launcher: launcher.sh
+
+workload:
+  configFile: llama_3_1_8b_cpu_sim.py
+  configPath: /workload/configs/
+  image: nvcr.io/nvidia/pytorch:26.05-py3
+  nodes: 2
+  ranksPerNode: 4
+  singlePodPerNode: true
+  steps: 100
+  hfToken:
+  ckptWriterInterval: 25
+  ckptToKeep: 1
+  asyncCheckpoint: "false"
+  useTensorstore: "false"
+  tsSingleArray: "0"
+  parallelCopyWorkers: 32
+  skipRamdiskStaging: "1"
+  tsDriver: "zarr3"
+  numShards: 10
+  additionalCheckpointPaths: ""
+  # Per-rank micro-batch, optimizer-step gradient accumulation, and dataloader
+  # workers. gradAccum is 1 to match the launcher's effective value;
+  # global_batch_size = perDeviceBatch * gradAccum * nodes * ranksPerNode.
+  perDeviceBatch: 8
+  gradAccum: 1
+  dataloaderWorkers: 16
+  modelId: "gs://huggingface-model-weights/Llama-3.1-8B"
+  # Parallel training strategy: ddp (default), fsdp_sharded, or fsdp_full.
+  trainingStrategy: ddp
+  # Per-step simulated compute time in seconds (stands in for GPU compute).
+  simulatedStepComputeSeconds: 1.0
+  # Packages installed/overridden for the run (gcsfs under test and/or a custom
+  # lightning build, etc.); fed to the launcher REQUIREMENTS install (runs last,
+  # so it overrides requirements.txt pins).
+  requirements:
+  envs:
+    - name: GLOO_SOCKET_IFNAME
+      value: eth0
+    - name: LOG_LEVEL
+      value: INFO
+    - name: GCSFS_LOG_LEVEL
+      value: INFO
+    - name: GRPC_ARG_KEEPALIVE_TIME_MS
+      value: "30000"
+    - name: GRPC_ARG_KEEPALIVE_TIMEOUT_MS
+      value: "20000"
+    - name: GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS
+      value: "1"
+    - name: GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA
+      value: "0"
+    - name: GRPC_ARG_CLIENT_IDLE_TIMEOUT_MS
+      value: "3600000"
+
+# gcsfs-only storage configuration (gs:// via gcsfs/fsspec). The experimental
+# zonal-bucket/HNS path is on by default in gcsfs (GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT
+# defaults to "true"), so it is intentionally not set here.
+gcsfs:
+  datasetPath: ""
+  ckptWritePath: ""
+  ckptLoadPath: ""
+
+gcsfuse:
+  enabled: false
+  datasetBucket: ""
+  checkpointBucket: ""
+  mountPathDataset: "/gcs/dataset"
+  mountPathCheckpoint: "/gcs/checkpoints"
+  mountOptions: "implicit-dirs"
+  sidecarImage: ""
+
+lustre:
+  enabled: false
+  datasetPvc: ""
+  checkpointPvc: ""
+  mountPathDataset: "/lustre/dataset"
+  mountPathCheckpoint: "/lustre/checkpoints"
+
