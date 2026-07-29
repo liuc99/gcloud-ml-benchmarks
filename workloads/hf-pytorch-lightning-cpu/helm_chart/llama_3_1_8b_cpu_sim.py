@@ -641,6 +641,7 @@ class LoggedModelCheckpoint(ModelCheckpoint):
             logging.info("[BENCHMARK] [gcsfs] Saved checkpoint directly via ExtendedGcsFileSystem to %s", target_path)
             return
 
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
         checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
         torch.save(checkpoint_dict, target_path)
 
