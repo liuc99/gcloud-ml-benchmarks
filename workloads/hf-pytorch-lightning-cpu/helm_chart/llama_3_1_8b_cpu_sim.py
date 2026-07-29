@@ -835,33 +835,12 @@ class LoggedModelCheckpoint(ModelCheckpoint):
         )
 
     def _write_checkpoint_file(self, trainer, target_path):
-        """Writes checkpoint dictionary to target_path directly on writer rank without DDP collective hooks."""
+        """Writes checkpoint directly using PyTorch Lightning's native ModelCheckpoint._save_checkpoint logic for exact fidelity."""
         if os.getenv("USE_TENSORSTORE", "false").lower() == "true" or os.getenv("CHECKPOINT_FORMAT", "").lower() == "tensorstore":
             self._write_tensorstore_checkpoint(trainer, target_path)
             return
 
-        if target_path.startswith("gs://"):
-            try:
-                from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
-                fs = ExtendedGcsFileSystem()
-                clean_path = target_path[5:]
-                checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
-                with fs.open(clean_path, "wb") as f:
-                    torch.save(checkpoint_dict, f)
-                logging.info("[BENCHMARK] [gcsfs] Saved checkpoint directly via ExtendedGcsFileSystem to %s", target_path)
-                return
-            except Exception as e:
-                logging.warning("[BENCHMARK] [gcsfs] ExtendedGcsFileSystem save failed for %s: %s; falling back to torch.save", target_path, e)
-
-        try:
-            checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
-            torch.save(checkpoint_dict, target_path)
-        except Exception:
-            if hasattr(trainer, "strategy") and hasattr(trainer.strategy, "checkpoint_io"):
-                checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
-                trainer.strategy.checkpoint_io.save_checkpoint(checkpoint_dict, target_path)
-            else:
-                super()._save_checkpoint(trainer, target_path)
+        super()._save_checkpoint(trainer, target_path)
 
     @staticmethod
     def _log_aggregated_metrics(trainer, local_bytes, start_wall, end_wall, filepath):
