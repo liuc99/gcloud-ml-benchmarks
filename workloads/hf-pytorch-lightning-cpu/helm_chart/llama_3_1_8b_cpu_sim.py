@@ -630,8 +630,19 @@ class LoggedModelCheckpoint(ModelCheckpoint):
             return res
 
     def _write_checkpoint_file(self, trainer, target_path):
-        """Writes checkpoint directly using PyTorch Lightning's native ModelCheckpoint._save_checkpoint logic for exact fidelity."""
-        super()._save_checkpoint(trainer, target_path)
+        """Writes checkpoint dictionary to target_path directly on writer rank without DDP collective hooks."""
+        if target_path.startswith("gs://"):
+            from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
+            fs = ExtendedGcsFileSystem()
+            clean_path = target_path[5:]
+            checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
+            with fs.open(clean_path, "wb") as f:
+                torch.save(checkpoint_dict, f)
+            logging.info("[BENCHMARK] [gcsfs] Saved checkpoint directly via ExtendedGcsFileSystem to %s", target_path)
+            return
+
+        checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
+        torch.save(checkpoint_dict, target_path)
 
     @staticmethod
     def _log_aggregated_metrics(trainer, local_bytes, start_wall, end_wall, filepath):
