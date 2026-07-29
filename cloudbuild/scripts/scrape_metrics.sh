@@ -8,7 +8,7 @@ source "$(dirname "$0")/lib.sh"
 trap 'record_failure scrape-metrics' ERR
 skip_if_failed
 source "${BUILD_VARS_FILE}"
-pip3 install --break-system-packages --quiet -r cloudbuild/macrobenchmarks/metrics/requirements.txt
+pip3 install --break-system-packages --quiet -r cloudbuild/metrics/requirements.txt
 START_TIME=$(cat /workspace/start_time.txt)
 END_TIME=$(cat /workspace/end_time.txt)
 RAW_DIR=/workspace/raw_metrics

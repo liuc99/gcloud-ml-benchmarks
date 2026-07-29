@@ -28,10 +28,10 @@ echo " Location            : $LOCATION"
 echo " Zone                : $ZONE"
 echo " Infra Prefix        : $INFRA_PREFIX"
 echo " GKE Service Account : $GKE_SERVICE_ACCOUNT"
-echo " Config File         : cloudbuild/macrobenchmarks/macrobenchmarks-tensorstore-gcsfuse-cloudbuild.yaml"
+echo " Config File         : cloudbuild/macrobenchmarks-tensorstore-gcsfuse-cloudbuild.yaml"
 echo "=================================================="
 
 gcloud builds submit \
-  --config=cloudbuild/macrobenchmarks/macrobenchmarks-tensorstore-gcsfuse-cloudbuild.yaml \
+  --config=cloudbuild/macrobenchmarks-tensorstore-gcsfuse-cloudbuild.yaml \
   --substitutions="_INFRA_PREFIX=${INFRA_PREFIX},_ZONE=${ZONE},_GKE_SERVICE_ACCOUNT=${GKE_SERVICE_ACCOUNT}" \
   --project="$PROJECT_ID"

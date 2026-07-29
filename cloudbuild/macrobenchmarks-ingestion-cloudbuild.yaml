@@ -44,7 +44,7 @@ steps:
         # than editing the checked-in schema in place (keeps the tracked file
         # pristine and the build idempotent/re-runnable).
         sed "s/@INFRA_PREFIX@/${_INFRA_PREFIX}/g" \
-          cloudbuild/macrobenchmarks/macrobenchmarks_schema.json \
+          cloudbuild/macrobenchmarks_schema.json \
           > /workspace/staging_schema.json
         # Fail loudly if the placeholder survived (e.g. the value was empty or
         # the schema drifted) rather than creating a table over a bad URI.
@@ -76,7 +76,7 @@ steps:
         # but never into the tracked source file.
         sed -e "s/@PROJECT_ID@/${PROJECT_ID}/g" \
             -e "s/@DATASET_NAME@/$${DATASET_NAME}/g" \
-            cloudbuild/macrobenchmarks/ingest.sql > /workspace/ingest.sql
+            cloudbuild/ingest.sql > /workspace/ingest.sql
         bq query --use_legacy_sql=false \
                  --project_id=${PROJECT_ID} \
                  < /workspace/ingest.sql
