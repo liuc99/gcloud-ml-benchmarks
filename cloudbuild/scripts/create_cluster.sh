@@ -57,10 +57,10 @@ if gcloud container clusters describe "$CLUSTER_NAME" --zone="${_ZONE}" --projec
   else
     CURRENT_NODES=$(gcloud container node-pools describe "${_MACHINE_TYPE}" --cluster="$CLUSTER_NAME" --zone="${_ZONE}" --project="${PROJECT_ID}" --format="value(nodeCount)" 2>/dev/null || echo "0")
     if [ "${CURRENT_NODES}" -lt "${_NODES}" ]; then
-      echo "--- Node pool ${_MACHINE_TYPE} has ${CURRENT_NODES} nodes, scaling UP to ${_NODES} ---"
+      echo "--- Node pool ${_MACHINE_TYPE} already exists on cluster ${CLUSTER_NAME} with ${CURRENT_NODES} nodes (< required ${_NODES}), scaling UP to ${_NODES} ---"
       gcloud container clusters resize "$CLUSTER_NAME" --node-pool="${_MACHINE_TYPE}" --num-nodes="${_NODES}" --zone="${_ZONE}" --project="${PROJECT_ID}" --quiet || true
     else
-      echo "--- Node pool ${_MACHINE_TYPE} currently has ${CURRENT_NODES} nodes (>= required ${_NODES}), skipping resize ---"
+      echo "--- Node pool ${_MACHINE_TYPE} already exists on cluster ${CLUSTER_NAME} with ${CURRENT_NODES} nodes (greater or equal to required ${_NODES}), skipping resize ---"
     fi
   fi
 else
