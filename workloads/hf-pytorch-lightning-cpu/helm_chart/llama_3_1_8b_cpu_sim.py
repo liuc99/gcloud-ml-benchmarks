@@ -839,29 +839,6 @@ class LoggedModelCheckpoint(ModelCheckpoint):
         if os.getenv("USE_TENSORSTORE", "false").lower() == "true" or os.getenv("CHECKPOINT_FORMAT", "").lower() == "tensorstore":
             self._write_tensorstore_checkpoint(trainer, target_path)
             return
-
-        if target_path.startswith("gs://"):
-            try:
-                import io
-                from google.cloud import storage
-                clean_path = target_path[5:]
-                bucket_name = clean_path.split("/")[0]
-                blob_name = "/".join(clean_path.split("/")[1:])
-
-                buffer = io.BytesIO()
-                checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
-                torch.save(checkpoint_dict, buffer)
-                buffer.seek(0)
-
-                client = storage.Client()
-                bucket = client.bucket(bucket_name)
-                blob = bucket.blob(blob_name)
-                blob.upload_from_file(buffer, content_type="application/octet-stream")
-                logging.info("[BENCHMARK] Successfully uploaded %d bytes to %s via google-cloud-storage", buffer.getbuffer().nbytes, target_path)
-                return
-            except Exception as gs_err:
-                logging.warning("[BENCHMARK] Direct GCS upload via google-cloud-storage failed: %s; falling back to torch.save", gs_err)
-
         try:
             checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
             torch.save(checkpoint_dict, target_path)
@@ -1015,21 +992,19 @@ class LoggedModelCheckpoint(ModelCheckpoint):
     def _measure_checkpoint_bytes(cls, filepath):
         if filepath.startswith("gs://"):
             try:
-                from google.cloud import storage
-                clean_path = filepath[5:]
-                bucket_name = clean_path.split("/")[0]
-                blob_name = "/".join(clean_path.split("/")[1:])
-                client = storage.Client()
-                blob = client.bucket(bucket_name).get_blob(blob_name)
-                if blob and blob.size > 0:
-                    return blob.size
-            except Exception:
-                pass
-            try:
-                import fsspec
-                fs, path = fsspec.core.url_to_fs(filepath)
-                if fs.exists(path):
-                    return fs.size(path)
+                from gcsfs.extended_gcsfs import ExtendedGcsFileSystem
+                fs = ExtendedGcsFileSystem()
+                ts_dir = filepath.replace(".ckpt", ".ts_zarr")
+                clean_path = ts_dir[5:]
+                info_list = fs.find(clean_path, detail=True)
+                if isinstance(info_list, dict):
+                    total_gcs_bytes = sum(v.get("size", 0) for v in info_list.values() if isinstance(v, dict))
+                elif isinstance(info_list, list):
+                    total_gcs_bytes = sum(v.get("size", 0) for v in info_list if isinstance(v, dict))
+                else:
+                    total_gcs_bytes = 0
+                if total_gcs_bytes > 0:
+                    return total_gcs_bytes
             except Exception:
                 pass
 
