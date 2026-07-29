@@ -12,7 +12,7 @@ pip3 install --break-system-packages --quiet -r cloudbuild/metrics/requirements.
 START_TIME=$(cat /workspace/start_time.txt)
 END_TIME=$(cat /workspace/end_time.txt)
 RAW_DIR=/workspace/raw_metrics
-cd cloudbuild/macrobenchmarks
+cd cloudbuild
 DATE_DIR=$(date +%Y%m%d)
 TS_DIR=$(date +%Y%m%d-%H%M%S)
 SUMMARY=/workspace/${TS_DIR}.csv
