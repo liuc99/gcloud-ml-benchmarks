@@ -51,7 +51,7 @@ gcloud builds submit \
   --substitutions=_PROJECT_ID="your-project-id",_ZONE="us-central1-b",_NODES="32",_MACHINE_TYPE="n4-standard-80"
 ```
 
-Refer to [docs/TensorStore_GCSFuse_Benchmark_Report.md](docs/TensorStore_GCSFuse_Benchmark_Report.md) for full multi-node results, MTU optimization strategies, and reproduction guides.
+Refer to [docs/tensorstore_gcsfuse_benchmark_report.md](docs/tensorstore_gcsfuse_benchmark_report.md) for full multi-node results, MTU optimization strategies, and reproduction guides.
 
 ### 2. PyTorch + Google Cloud Managed Lustre Benchmark
 
