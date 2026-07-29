@@ -438,7 +438,7 @@ class LoggedModelCheckpoint(ModelCheckpoint):
         start_time_perf = time.perf_counter()
 
         if target_filepath.startswith("gs://"):
-            backend_label = "Direct GCS (gcsfs)"
+            backend_label = "TensorStore Direct GCS"
         elif "/lustre" in target_filepath:
             backend_label = "Lustre"
         elif "/gcs" in target_filepath:
@@ -629,8 +629,217 @@ class LoggedModelCheckpoint(ModelCheckpoint):
                     callback.ckpt_time += (time.perf_counter() - start_time_perf)
             return res
 
+    def _write_tensorstore_checkpoint(self, trainer, target_path):
+        """Writes checkpoint state dict as TensorStore Zarr arrays to target_path."""
+        import tensorstore as ts
+        import numpy as np
+        ts_driver = os.getenv("TS_DRIVER", "zarr").lower()
+        ext = ".ts_bin" if ts_driver in ("raw", "bin", "npy", "npz") else ".ts_zarr"
+        ts_dir = target_path.replace(".ckpt", ext)
+        logging.info(
+            "[BENCHMARK] [TensorStore] Save Start (Rank %d) : Step: %d : Path: %s",
+            trainer.global_rank,
+            trainer.global_step,
+            ts_dir,
+        )
+        t0 = time.perf_counter()
+        checkpoint_dict = trainer._checkpoint_connector.dump_checkpoint()
+        state_dict = checkpoint_dict.get("state_dict", {})
+        ts_driver = os.getenv("TS_DRIVER", "zarr").lower()
+        if ts_driver in ("zarr3", "zarr3_sharded", "sharded10", "raw10", "bin10"):
+            items_to_write = [(k, v) for k, v in state_dict.items() if isinstance(v, torch.Tensor)]
+            num_shards = int(os.getenv("NUM_SHARDS", "10"))
+            shard_items = [[] for _ in range(num_shards)]
+            for idx, item in enumerate(items_to_write):
+                shard_items[idx % num_shards].append(item)
+
+            import gc
+
+            def _write_shard(shard_idx):
+                items = shard_items[shard_idx]
+                flat_list = []
+                for name, tensor in items:
+                    if tensor.dtype in (torch.bfloat16, torch.float16):
+                        flat_list.append(tensor.detach().cpu().view(torch.uint8).numpy().ravel())
+                    else:
+                        flat_list.append(tensor.detach().cpu().numpy().ravel())
+                if not flat_list:
+                    return 0
+                concat_arr = np.concatenate(flat_list)
+                del flat_list
+                if ts_driver in ("raw10", "bin10"):
+                    subpath_bin = os.path.join(ts_dir, f"shard_{shard_idx:02d}.bin")
+                    os.makedirs(os.path.dirname(subpath_bin), exist_ok=True)
+                    with open(subpath_bin, "wb") as f:
+                        f.write(concat_arr.tobytes())
+                    written_nbytes = concat_arr.nbytes
+                    del concat_arr
+                    gc.collect()
+                    return written_nbytes
+                else:
+                    subpath = os.path.join(ts_dir, f"shard_{shard_idx:02d}.zarr")
+                    if subpath.startswith("gs://"):
+                        clean_path = subpath[5:]
+                        bucket = clean_path.split("/")[0]
+                        blob_path = "/".join(clean_path.split("/")[1:])
+                        kvstore_spec = {"driver": "gcs", "bucket": bucket, "path": blob_path}
+                    else:
+                        kvstore_spec = {"driver": "file", "path": subpath}
+                    spec = {
+                        "driver": "zarr",
+                        "kvstore": kvstore_spec,
+                        "metadata": {
+                            "dtype": concat_arr.dtype.str,
+                            "shape": [len(concat_arr)],
+                            "chunks": [len(concat_arr)],
+                            "compressor": None,
+                        },
+                        "create": True,
+                        "delete_existing": True,
+                    }
+                    try:
+                        dataset = ts.open(spec).result()
+                        dataset.write(concat_arr).result()
+                        written_nbytes = concat_arr.nbytes
+                        del concat_arr
+                        gc.collect()
+                        return written_nbytes
+                    except Exception as e:
+                        logging.error("[BENCHMARK] [TensorStore] Exception writing shard %d: %s", shard_idx, e, exc_info=True)
+                        raise e
+
+            ts_max_workers = int(os.getenv("TS_MAX_WORKERS", "2"))
+            with ThreadPoolExecutor(max_workers=min(ts_max_workers, num_shards)) as executor:
+                written_bytes = list(executor.map(_write_shard, range(num_shards)))
+            count = len(written_bytes)
+        elif os.getenv("TS_SINGLE_ARRAY", "0") == "1":
+            flat_list = []
+            for name, tensor in state_dict.items():
+                if isinstance(tensor, torch.Tensor):
+                    if tensor.dtype in (torch.bfloat16, torch.float16):
+                        flat_list.append(tensor.detach().cpu().view(torch.uint8).numpy().ravel())
+                    else:
+                        flat_list.append(tensor.detach().cpu().numpy().ravel())
+            if flat_list:
+                concat_arr = np.concatenate(flat_list)
+                del flat_list
+                subpath = os.path.join(ts_dir, "model_state")
+                if subpath.startswith("gs://"):
+                    clean_path = subpath[5:]
+                    bucket = clean_path.split("/")[0]
+                    blob_path = "/".join(clean_path.split("/")[1:])
+                    kvstore_spec = {"driver": "gcs", "bucket": bucket, "path": blob_path}
+                else:
+                    kvstore_spec = {"driver": "file", "path": subpath}
+                spec = {
+                    "driver": "zarr",
+                    "kvstore": kvstore_spec,
+                    "metadata": {
+                        "dtype": concat_arr.dtype.str,
+                        "shape": [len(concat_arr)],
+                        "chunks": [len(concat_arr)],
+                        "compressor": None,
+                    },
+                    "create": True,
+                    "delete_existing": True,
+                }
+                try:
+                    dataset = ts.open(spec).result()
+                    dataset.write(concat_arr).result()
+                    del concat_arr
+                    gc.collect()
+                    count = 1
+                except Exception as e:
+                    logging.error("[BENCHMARK] [TensorStore] Exception writing single array: %s", e, exc_info=True)
+                    raise e
+        else:
+            items_to_write = [(k, v) for k, v in state_dict.items() if isinstance(v, torch.Tensor)]
+            max_workers = int(os.getenv("PARALLEL_COPY_WORKERS", "32"))
+
+            def _write_tensor_item(item):
+                name, tensor = item
+                if tensor.dtype in (torch.bfloat16, torch.float16):
+                    arr = tensor.detach().cpu().view(torch.uint8).numpy()
+                else:
+                    arr = tensor.detach().cpu().numpy()
+                subpath = os.path.join(ts_dir, name.replace(".", "/"))
+                ts_driver = os.getenv("TS_DRIVER", "zarr").lower()
+                if ts_driver in ("raw", "bin", "npy", "npz"):
+                    subpath_bin = subpath + ".bin"
+                    os.makedirs(os.path.dirname(subpath_bin), exist_ok=True)
+                    with open(subpath_bin, "wb") as f:
+                        f.write(arr.tobytes())
+                    return arr.nbytes
+                else:
+                    if subpath.startswith("gs://"):
+                        clean_path = subpath[5:]
+                        bucket = clean_path.split("/")[0]
+                        blob_path = "/".join(clean_path.split("/")[1:])
+                        kvstore_spec = {"driver": "gcs", "bucket": bucket, "path": blob_path}
+                    else:
+                        kvstore_spec = {"driver": "file", "path": subpath}
+                    ts_chunk_size = int(os.getenv("TS_CHUNK_SIZE", "0"))
+                    if ts_chunk_size > 0 and arr.shape:
+                        chunks_spec = [min(d, ts_chunk_size) for d in arr.shape]
+                    else:
+                        chunks_spec = list(arr.shape) if arr.shape else [1]
+
+                    dtype_str = arr.dtype.str
+                    spec = {
+                        "driver": "zarr",
+                        "kvstore": kvstore_spec,
+                        "metadata": {
+                            "dtype": dtype_str,
+                            "shape": list(arr.shape),
+                            "chunks": chunks_spec,
+                            "compressor": None,
+                        },
+                        "create": True,
+                        "delete_existing": True,
+                    }
+                    try:
+                        dataset = ts.open(spec).result()
+                        dataset.write(arr).result()
+                        return arr.nbytes
+                    except Exception as e:
+                        if subpath.startswith("gs://") and ("appendable objects" in str(e) or "400" in str(e)):
+                            logging.warning("[BENCHMARK] [TensorStore] Direct REST GCS ('driver: gcs') is unsupported on Rapid/Zonal buckets: %s", e)
+                            return 0
+                        logging.error("[BENCHMARK] [TensorStore] Exception writing tensor '%s' (kvstore: %s): %s", name, kvstore_spec, e, exc_info=True)
+                        raise e
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                written_bytes = list(executor.map(_write_tensor_item, items_to_write))
+            count = len(written_bytes)
+        dur = time.perf_counter() - t0
+        total_files = 0
+        total_bytes = 0
+        if os.path.exists(ts_dir) and os.path.isdir(ts_dir):
+            for dirpath, _, filenames in os.walk(ts_dir):
+                total_files += len(filenames)
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    if not os.path.islink(fp):
+                        total_bytes += self._get_effective_file_bytes(fp)
+
+        logging.info(
+            "[BENCHMARK] [TensorStore] Finished writing %d tensors (%d total files, %.2f MB / %.2f GB) via TensorStore to %s in %.2f seconds for global_step %d from rank %d",
+            count,
+            total_files,
+            total_bytes / (1024 * 1024),
+            total_bytes / (1024 * 1024 * 1024),
+            ts_dir,
+            dur,
+            trainer.global_step,
+            trainer.global_rank,
+        )
+
     def _write_checkpoint_file(self, trainer, target_path):
         """Writes checkpoint directly using PyTorch Lightning's native ModelCheckpoint._save_checkpoint logic for exact fidelity."""
+        if os.getenv("USE_TENSORSTORE", "false").lower() == "true" or os.getenv("CHECKPOINT_FORMAT", "").lower() == "tensorstore":
+            self._write_tensorstore_checkpoint(trainer, target_path)
+            return
+
         super()._save_checkpoint(trainer, target_path)
 
     @staticmethod
@@ -642,6 +851,9 @@ class LoggedModelCheckpoint(ModelCheckpoint):
             backend_label = "Lustre"
         elif "/gcs" in filepath:
             backend_label = "GCSFuse"
+
+        if os.getenv("USE_TENSORSTORE", "false").lower() == "true":
+            backend_label = f"TensorStore ({backend_label})"
 
         local_info = {
             "rank": trainer.global_rank,
