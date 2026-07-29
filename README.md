@@ -32,55 +32,52 @@ gcloud-ml-benchmarks/
 │   │   └── helm_chart/
 │   └── hf-pytorch-lightning-cpu/ # PyTorch Llama 3.1 8B DDP training & checkpoint harness
 │       └── helm_chart/
-└── docs/                        # Step-by-step reproduction guide & test results by dimension
-    ├── README.md                # Documentation index
-    ├── step_by_step_guide.md    # Manual reproduction guide
-    └── results/                 # Test results breakdown by dimension
-        ├── node_scaling.md                # 1 to 32 nodes (up to 1.35 Tbps aggregate read)
-        ├── network_mtu.md                 # 8896 Jumbo Frames vs 1500 MTU
-        ├── client_protocols.md            # HTTP/1.1 vs gRPC protocol comparison
-        ├── chunk_size_and_file_size.md    # 50MB vs 200MB vs 400MB chunk size & slice retrieval
-        └── concurrency_and_mount_tuning.md # Worker scaling & global-max-blocks tuning
+└── docs/                        # Documentation suite organized by benchmark workload
+    ├── README.md                # Master documentation index
+    ├── tensorstore/             # TensorStore + GCSFuse benchmark suite
+    │   ├── step_by_step_guide.md# Manual reproduction guide
+    │   └── results/             # Results by dimension (scaling, MTU, protocols, chunks, concurrency)
+    └── pytorch/                 # PyTorch + Storage benchmark suite
+        ├── step_by_step_guide.md# Manual reproduction guide (Lustre, GCSFuse, gcsfs)
+        └── results/             # PyTorch benchmark results
 ```
 
 ---
 
-## 🚀 Running Benchmarks
+## 🚀 Quick Links & Documentation
+
+* 📦 **TensorStore Benchmarks**:
+  * [**TensorStore Documentation Index**](docs/tensorstore/README.md)
+  * [**Step-by-Step Reproduction Guide**](docs/tensorstore/step_by_step_guide.md)
+  * [**Multi-Node Cluster Scaling (1 to 32 Nodes)**](docs/tensorstore/results/node_scaling.md)
+  * [**Network MTU Tuning (8896 Jumbo Frames vs 1500 MTU)**](docs/tensorstore/results/network_mtu.md)
+  * [**Client Protocols (HTTP/1.1 vs gRPC)**](docs/tensorstore/results/client_protocols.md)
+  * [**Zarr Chunk Size & Slicing Latency**](docs/tensorstore/results/chunk_size_and_file_size.md)
+  * [**Worker Concurrency & Mount Tuning**](docs/tensorstore/results/concurrency_and_mount_tuning.md)
+
+* 🔥 **PyTorch Benchmarks**:
+  * [**PyTorch Documentation Index**](docs/pytorch/README.md)
+  * [**Step-by-Step Reproduction Guide (Managed Lustre, GCSFuse, gcsfs)**](docs/pytorch/step_by_step_guide.md)
+
+---
+
+## ⚡ CloudBuild Execution Commands
 
 ### 1. TensorStore + GCSFuse Benchmark
-
-To run the multi-node TensorStore benchmark on GKE:
-
 ```bash
 gcloud builds submit \
   --config=cloudbuild/macrobenchmarks-tensorstore-gcsfuse-cloudbuild.yaml \
   --substitutions=_PROJECT_ID="your-project-id",_ZONE="us-central1-b",_NODES="32",_MACHINE_TYPE="n4-standard-80"
 ```
 
-For step-by-step manual setup instructions and detailed tuning metrics:
-- [**Step-by-Step Reproduction Guide**](docs/step_by_step_guide.md)
-- [**Multi-Node Cluster Scaling (1 to 32 Nodes)**](docs/results/node_scaling.md)
-- [**Network MTU Tuning (8896 Jumbo Frames vs 1500 MTU)**](docs/results/network_mtu.md)
-- [**Client Protocols (HTTP/1.1 vs gRPC)**](docs/results/client_protocols.md)
-- [**Zarr Chunk Size & Slicing Latency**](docs/results/chunk_size_and_file_size.md)
-- [**Worker Concurrency & Mount Tuning**](docs/results/concurrency_and_mount_tuning.md)
-
 ### 2. PyTorch + Google Cloud Managed Lustre Benchmark
-
-To run the PyTorch model checkpointing benchmark against Google Cloud Managed Lustre:
-
 ```bash
 gcloud builds submit \
   --config=cloudbuild/macrobenchmarks-gcsfuse-cloudbuild.yaml \
   --substitutions=_USE_LUSTRE="true",_LUSTRE_INSTANCE="your-lustre-instance-id",_NODES="2",_RANKS_PER_NODE="4"
 ```
 
-The script automatically provisions the required Kubernetes PV and PVC using the GKE `LustreCsiDriver` (`lustre.csi.storage.gke.io`).
-
 ### 3. PyTorch + GCSFuse Benchmark
-
-To run PyTorch model checkpointing and dataset reading over GCSFuse:
-
 ```bash
 gcloud builds submit \
   --config=cloudbuild/macrobenchmarks-gcsfuse-cloudbuild.yaml \
