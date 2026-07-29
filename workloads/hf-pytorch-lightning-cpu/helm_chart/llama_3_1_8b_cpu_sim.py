@@ -931,7 +931,7 @@ class LoggedModelCheckpoint(ModelCheckpoint):
                         all_targets.append(extra_file)
 
         staged_tmp_file = None
-        if is_writer and len(all_targets) > 1 and os.getenv("SKIP_RAMDISK_STAGING", "0") != "1":
+        if is_writer and len(all_targets) > 1 and os.getenv("SKIP_RAMDISK_STAGING", "1") == "0":
             stage_dir = "/dev/shm" if os.path.exists("/dev/shm") else None
             staged_fd, staged_tmp_file = tempfile.mkstemp(prefix="staged_ckpt_", suffix=".ckpt", dir=stage_dir)
             os.close(staged_fd)
