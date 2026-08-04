@@ -1,37 +1,39 @@
 ---
 name: maxtext-dataset-benchmark
-description: Skill for converting Parquet datasets to ArrayRecord, deploying MaxText dataset loading benchmarks on GKE, and running Parquet vs ArrayRecord & Shuffle strategy comparative benchmarks.
+description: Skill for running MaxText dataset loading demos with flexible format selection (Parquet or ArrayRecord), optional Parquet-to-ArrayRecord preprocessing, and shuffle strategy benchmarking on GKE.
 ---
 
 # MaxText Dataset Benchmark & Conversion Skill (`maxtext-dataset-benchmark`)
 
-This skill enables an AI Agent to automate dataset conversion from Parquet to ArrayRecord, deploy MaxText dataset loading benchmarks on GKE via Helm, run multi-strategy shuffle benchmarks (`none`, `two_stage`, `global`), and parse ingestion metrics.
+This skill enables an AI Agent to execute MaxText dataset loading demos on GKE using **either Parquet or ArrayRecord** formats. 
+
+If a user provides a Parquet dataset and wants to test or evaluate ArrayRecord, an optional conversion tool (`parquet_to_arrayrecord.py`) is provided to pre-tokenize and convert Parquet shards into ArrayRecord before running the benchmark.
 
 ---
 
-## 🛠️ Tasks & Capabilities
+## 🎯 Format Selection & Decision Workflow
 
-### 1. Parquet to ArrayRecord Dataset Conversion
-Convert raw Parquet text shards to pre-tokenized `.array_record` shards holding `int32` token arrays using the standalone converter:
+When the user asks to run the MaxText dataset benchmark or demo:
 
-```bash
-python3 workloads/maxtext-parquet-loader/helm_chart/parquet_to_arrayrecord.py \
-  --input-path="${INPUT_PARQUET_PATH}" \
-  --output-path="${OUTPUT_ARRAYRECORD_PATH}" \
-  --sequence-length=${SEQUENCE_LENGTH:-2048} \
-  --max-files=${MAX_FILES:-20}
+```mermaid
+graph TD
+    A[User Request / Dataset] --> B{Dataset Format?}
+    B -->|Parquet| C{User Target Format?}
+    B -->|ArrayRecord| D[Option B: Run ArrayRecord Demo directly]
+    C -->|Parquet| E[Option A: Run Parquet Demo directly]
+    C -->|ArrayRecord| F[Step 1: Convert Parquet -> ArrayRecord]
+    F --> D
 ```
 
-*Note*: Supports GCS RAPID zonal storage class (`gs://...`) using `gcsfs` appendable streaming writes.
-
 ---
 
-### 2. Deploy Benchmark Runs via Helm
+## 🛠️ Step-by-Step Execution Protocols
 
-Navigate to `workloads/maxtext-parquet-loader/helm_chart`.
+### Option A: Direct Parquet Loader Demo (`format=parquet`)
+Use when testing existing Parquet datasets with GCS Range Reads and on-the-fly tokenization:
 
-#### Run A: Parquet Loader Benchmark (`parquet`)
 ```bash
+cd workloads/maxtext-parquet-loader/helm_chart
 helm install maxtext-demo-run . \
   --set gcsfs.datasetPath="${DATASET_PATH}" \
   --set workload.datasetFormat="parquet" \
@@ -40,10 +42,15 @@ helm install maxtext-demo-run . \
   --set workload.maxBatches=100
 ```
 
-#### Run B: ArrayRecord Loader Benchmark (`arrayrecord`)
+---
+
+### Option B: Direct ArrayRecord Loader Demo (`format=arrayrecord`)
+Use when testing pre-tokenized ArrayRecord datasets for sub-millisecond batch latencies:
+
 ```bash
+cd workloads/maxtext-parquet-loader/helm_chart
 helm install maxtext-demo-run . \
-  --set gcsfs.datasetPath="${DATASET_PATH}" \
+  --set gcsfs.datasetPath="${ARRAYRECORD_DATASET_PATH}" \
   --set workload.datasetFormat="arrayrecord" \
   --set workload.convertToArrayRecord=false \
   --set workload.shuffleMode="${SHUFFLE_MODE:-two_stage}" \
@@ -53,28 +60,57 @@ helm install maxtext-demo-run . \
 
 ---
 
-### 3. Asynchronous Log & Milestone Monitoring
-Monitor pod execution and log summary output:
+### Option C: Optional Parquet to ArrayRecord Conversion & Demo
+If the user **only has a Parquet dataset** but wants to evaluate or switch to **ArrayRecord**:
+
+#### 1. Convert Parquet Shards to ArrayRecord:
+```bash
+python3 workloads/maxtext-parquet-loader/helm_chart/parquet_to_arrayrecord.py \
+  --input-path="${INPUT_PARQUET_PATH}" \
+  --output-path="${OUTPUT_ARRAYRECORD_PATH}" \
+  --sequence-length=${SEQUENCE_LENGTH:-2048} \
+  --max-files=${MAX_FILES:-20}
+```
+*Note*: Supports GCS RAPID zonal storage buckets (`gs://...`) via `gcsfs` appendable streaming writes.
+
+#### 2. Run ArrayRecord Demo on Converted Data:
+```bash
+cd workloads/maxtext-parquet-loader/helm_chart
+helm install maxtext-demo-run . \
+  --set gcsfs.datasetPath="${OUTPUT_ARRAYRECORD_PATH}" \
+  --set workload.datasetFormat="arrayrecord" \
+  --set workload.convertToArrayRecord=false \
+  --set workload.shuffleMode="${SHUFFLE_MODE:-two_stage}" \
+  --set workload.batchSize=64 \
+  --set workload.maxBatches=100
+```
+
+---
+
+## 📊 Milestone Monitoring & Performance Validation
+
+Monitor pod execution and parse summary logs:
 
 ```bash
-# Get pod status
+# Check pod status
 kubectl get pods -l jobset.sigs.k8s.io/jobset-name=maxtext-demo-run
 
-# Stream/Fetch benchmark output
+# Stream benchmark output
 kubectl logs pod/${POD_NAME} --tail=40
 ```
 
 Verify key metrics in output:
+- **Data Format**: `PARQUET` vs `ARRAYRECORD`
 - **Time to First Batch (TTFB)** (ms)
 - **Upfront Index Scanning Penalty** (ms)
 - **Batch Load Latency Percentiles** (`p50`, `p95`, `p99` ms)
 - **Sample Ingestion Speed** (samples/sec)
-- **Payload Data Read Volume** (MB)
 
 ---
 
-### 4. Release Cleanup & Teardown
-Uninstall the Helm release when benchmark runs complete:
+## 🧹 Cleanup & Teardown Protocol
+
+Always uninstall the Helm release when benchmark execution is complete or aborted:
 
 ```bash
 helm uninstall maxtext-demo-run --ignore-not-found
