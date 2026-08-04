@@ -160,13 +160,22 @@ def convert_parquet_to_arrayrecord(input_path, output_path, text_column="text", 
         writer.close()
 
         if is_native_gcs and out_gcs_file:
-            from google.cloud import storage
+            import google.auth
+            from google.auth.transport.requests import Request
+            import requests
+
             gcs_path_no_prefix = out_gcs_file.replace("gs://", "")
             bucket_name, blob_name = gcs_path_no_prefix.split("/", 1)
-            storage_client = storage.Client()
-            bucket = storage_client.bucket(bucket_name)
-            blob = bucket.blob(blob_name, chunk_size=100 * 1024 * 1024)
-            blob.upload_from_filename(local_tmp_path)
+            credentials, _ = google.auth.default()
+            credentials.refresh(Request())
+            headers = {
+                "Authorization": f"Bearer {credentials.token}",
+                "Content-Type": "application/octet-stream",
+            }
+            url = f"https://storage.googleapis.com/upload/storage/v1/b/{bucket_name}/o?uploadType=media&name={blob_name}"
+            with open(local_tmp_path, "rb") as f:
+                resp = requests.post(url, headers=headers, data=f)
+                resp.raise_for_status()
             os.remove(local_tmp_path)
 
         shard_duration = time.perf_counter() - shard_start
