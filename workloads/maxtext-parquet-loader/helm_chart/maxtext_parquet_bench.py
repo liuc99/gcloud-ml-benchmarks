@@ -263,6 +263,7 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     loaded_batches = 0
     total_samples = 0
     total_feature_bytes = 0
+    batch_durations = []
 
     # Iterate Parquet shard files lazily and read targeted column row groups
     for fpath in rank_files:
@@ -294,42 +295,41 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
             total_samples += num_samples
             total_feature_bytes += batch_bytes
             loaded_batches += 1
+            batch_durations.append(rg_duration)
 
             if loaded_batches % 20 == 0:
-                logging.info(f"  [MaxText Batch {loaded_batches}/{max_batches}] Read {num_samples} samples ({batch_bytes / 1e6:.2f} MB)")
+                logging.info(f"  [MaxText Batch {loaded_batches}/{max_batches}] Read {num_samples} samples ({batch_bytes / (1024 * 1024):.2f} MB)")
 
     total_duration = time.perf_counter() - bench_start
-    data_bytes_read = fs_wrapper.total_bytes_read
-    data_range_requests = fs_wrapper.range_read_calls
 
-    throughput_mbs = (data_bytes_read / (1024 * 1024)) / total_duration if total_duration > 0 else 0.0
+    # Effective Feature IO Read Throughput
+    throughput_mbs = (total_feature_bytes / (1024 * 1024)) / total_duration if total_duration > 0 else 0.0
     throughput_gbps = (throughput_mbs * 8) / 1024
     samples_per_sec = total_samples / total_duration if total_duration > 0 else 0.0
 
-    # Range Read Efficiency: Ratio of useful feature payload bytes vs total bytes read from GCS
-    efficiency_pct = (total_feature_bytes / data_bytes_read * 100.0) if data_bytes_read > 0 else 100.0
-
-    avg_range_latency_ms = (np.mean(fs_wrapper.range_read_durations) * 1000) if fs_wrapper.range_read_durations else 0.0
-    p95_range_latency_ms = (np.percentile(fs_wrapper.range_read_durations, 95) * 1000) if fs_wrapper.range_read_durations else 0.0
+    avg_batch_ms = (np.mean(batch_durations) * 1000) if batch_durations else 0.0
+    p50_batch_ms = (np.percentile(batch_durations, 50) * 1000) if batch_durations else 0.0
+    p95_batch_ms = (np.percentile(batch_durations, 95) * 1000) if batch_durations else 0.0
+    p99_batch_ms = (np.percentile(batch_durations, 99) * 1000) if batch_durations else 0.0
 
     logging.info("==================================================================================")
     logging.info("                    MAXTEXT PARQUET GCS RANGE READ SUMMARY                        ")
     logging.info("==================================================================================")
     logging.info(f"Access Mode              : {access_mode}")
     logging.info(f"Dataset Path             : {dataset_path}")
-    logging.info(f"Target Projected Columns : {columns_to_read}")
+    logging.info(f"Total Dataset Shards     : {len(parquet_files)} Parquet files")
+    logging.info(f"Target Projected Columns : {columns_list}")
     logging.info(f"Total Batches Ingested   : {loaded_batches} batches")
-    logging.info(f"Total Samples Processed  : {total_samples} samples")
+    logging.info(f"Total Samples Ingested   : {total_samples} samples")
+    logging.info(f"Payload Data Read Volume : {total_feature_bytes / (1024 * 1024):.2f} MB ({total_feature_bytes / (1024 * 1024 * 1024):.4f} GB)")
     logging.info(f"Time to First Batch TTFB : {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
     logging.info(f"Schema Discovery Latency : {footer_duration * 1000:.2f} ms")
-    logging.info(f"Data GCS Range Requests  : {data_range_requests} requests")
-    logging.info(f"GCS Bytes Downloaded     : {data_bytes_read / (1024 * 1024):.2f} MB")
-    logging.info(f"Useful Feature Payload   : {total_feature_bytes / (1024 * 1024):.2f} MB")
-    logging.info(f"Range Read Efficiency    : {efficiency_pct:.2f}%")
-    logging.info(f"Read Throughput          : {throughput_mbs:.2f} MB/s ({throughput_gbps:.2f} Gbps)")
-    logging.info(f"Ingestion Speed          : {samples_per_sec:.2f} samples/sec")
-    logging.info(f"Range Read Latency (Avg) : {avg_range_latency_ms:.2f} ms")
-    logging.info(f"Range Read Latency (p95) : {p95_range_latency_ms:.2f} ms")
+    logging.info(f"IO Read Throughput       : {throughput_mbs:.2f} MB/s ({throughput_gbps:.2f} Gbps)")
+    logging.info(f"Sample Ingestion Speed   : {samples_per_sec:.2f} samples/sec")
+    logging.info(f"Batch Load Latency (Avg) : {avg_batch_ms:.2f} ms")
+    logging.info(f"Batch Load Latency (p50) : {p50_batch_ms:.2f} ms")
+    logging.info(f"Batch Load Latency (p95) : {p95_batch_ms:.2f} ms")
+    logging.info(f"Batch Load Latency (p99) : {p99_batch_ms:.2f} ms")
     logging.info("==================================================================================")
 
 
