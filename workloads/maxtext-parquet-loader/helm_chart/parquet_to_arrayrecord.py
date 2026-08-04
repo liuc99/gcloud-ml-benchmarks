@@ -161,11 +161,11 @@ def convert_parquet_to_arrayrecord(input_path, output_path, text_column="text", 
 
         if is_native_gcs and out_gcs_file:
             from google.cloud import storage
-            gcs_path_no_prefix = out_gcs_file[5:]
+            gcs_path_no_prefix = out_gcs_file.replace("gs://", "")
             bucket_name, blob_name = gcs_path_no_prefix.split("/", 1)
             storage_client = storage.Client()
             bucket = storage_client.bucket(bucket_name)
-            blob = bucket.blob(blob_name)
+            blob = bucket.blob(blob_name, chunk_size=100 * 1024 * 1024)
             blob.upload_from_filename(local_tmp_path)
             os.remove(local_tmp_path)
 
