@@ -39,6 +39,13 @@ def parse_args():
         help="Access mode: native_gcs (gs:// via pyarrow/gcsfs), gcsfuse (/gcs/ via FUSE mount), posix",
     )
     parser.add_argument(
+        "--format",
+        type=str,
+        default="parquet",
+        choices=["parquet", "arrayrecord"],
+        help="Dataset format to benchmark: 'parquet' or 'arrayrecord'",
+    )
+    parser.add_argument(
         "--columns",
         type=str,
         default="input_ids,label",
@@ -204,7 +211,7 @@ def setup_filesystem(dataset_path, access_mode):
 # -----------------------------------------------------------------------------
 # MaxText Parquet Range Read Pipeline
 # -----------------------------------------------------------------------------
-def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, batch_size, max_batches, num_threads, rank, world_size, shuffle_mode="none"):
+def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, batch_size, max_batches, num_threads, rank, world_size, shuffle_mode="none", data_format="parquet"):
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -212,33 +219,45 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
         logging.error("pyarrow is required for MaxText Parquet Range Read benchmark. Please install pyarrow (e.g. pip install pyarrow).")
         sys.exit(1)
 
+    try:
+        import sys
+        sys.path.append(os.path.expanduser("~/.local/lib/python3.13/site-packages"))
+        from array_record.python import array_record_module
+    except ImportError:
+        array_record_module = None
+
+    if data_format == "arrayrecord" and array_record_module is None:
+        logging.error("array_record module is required for arrayrecord format benchmark. Please install array-record.")
+        sys.exit(1)
+
     fs_wrapper, clean_path, access_mode = setup_filesystem(dataset_path, access_mode)
 
-    logging.info(f"[MAXTEXT] Discovering Parquet shard files under: {clean_path}")
+    ext = ".array_record" if data_format == "arrayrecord" else ".parquet"
+    logging.info(f"[MAXTEXT] Discovering {data_format.upper()} ({ext}) shard files under: {clean_path}")
     
     start_discovery = time.perf_counter()
     if access_mode == "native_gcs":
         selector = pa.fs.FileSelector(clean_path, recursive=True)
         file_infos = fs_wrapper.fs.get_file_info(selector)
-        parquet_files = [info.path for info in file_infos if info.path.endswith(".parquet")]
+        shard_files = [info.path for info in file_infos if info.path.endswith(ext)]
     else:
-        parquet_files = [
+        shard_files = [
             os.path.join(root, file)
             for root, _, files in os.walk(clean_path)
             for file in files
-            if file.endswith(".parquet")
+            if file.endswith(ext)
         ]
 
-    parquet_files = sorted(parquet_files)
+    shard_files = sorted(shard_files)
     discovery_duration = time.perf_counter() - start_discovery
-    logging.info(f"[MAXTEXT] Found {len(parquet_files)} Parquet files in {discovery_duration:.4f}s")
+    logging.info(f"[MAXTEXT] Found {len(shard_files)} {data_format.upper()} files in {discovery_duration:.4f}s")
 
-    if not parquet_files:
-        raise FileNotFoundError(f"No .parquet files found in {dataset_path}")
+    if not shard_files:
+        raise FileNotFoundError(f"No {ext} files found in {dataset_path}")
 
     # Shard files across JAX process ranks (MaxText multi-node data parallelism)
-    rank_files = parquet_files[rank::world_size]
-    logging.info(f"[MAXTEXT] [Rank {rank}/{world_size}] Assigned {len(rank_files)} Parquet shards")
+    rank_files = shard_files[rank::world_size]
+    logging.info(f"[MAXTEXT] [Rank {rank}/{world_size}] Assigned {len(rank_files)} {data_format.upper()} shards")
 
     upfront_index_duration = 0.0
 
@@ -248,38 +267,44 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
         random.seed(42 + rank)
         random.shuffle(rank_files)
     elif shuffle_mode == "global":
-        logging.info("[MAXTEXT] [SHUFFLE: GLOBAL] Stage 1: Upfront Scanning ALL Parquet footers to build Global Index Map...")
+        logging.info(f"[MAXTEXT] [SHUFFLE: GLOBAL] Stage 1: Upfront Scanning ALL {data_format.upper()} footers to build Global Index Map...")
         idx_start = time.perf_counter()
         from concurrent.futures import ThreadPoolExecutor
         def scan_footer(fp):
-            m = pq.read_metadata(fp, filesystem=fs_wrapper.fs)
-            return fp, m.num_rows
+            if data_format == "parquet":
+                m = pq.read_metadata(fp, filesystem=fs_wrapper.fs)
+                return fp, m.num_rows
+            else:
+                r = array_record_module.ArrayRecordReader(fp)
+                return fp, r.num_records()
         with ThreadPoolExecutor(max_workers=16) as exec_pool:
             _ = list(exec_pool.map(scan_footer, rank_files))
         upfront_index_duration = time.perf_counter() - idx_start
         logging.info(f"[MAXTEXT] [SHUFFLE: GLOBAL] ⚠️ Upfront Global Index Map Created in {upfront_index_duration:.2f}s ({upfront_index_duration * 1000:.0f} ms penalty!)")
 
-    # Step 1: MaxText Schema Auto-Discovery & Row Group Range Read Setup
-    logging.info("[MAXTEXT] Step 1: Initializing Parquet Schema Discovery & Dataset Shard Reader...")
+    # Step 1: MaxText Schema Auto-Discovery & Header Reader Setup
+    logging.info(f"[MAXTEXT] Step 1: Initializing {data_format.upper()} Schema Discovery & Dataset Shard Reader...")
     footer_start = time.perf_counter()
 
-    first_pq = pq.ParquetFile(rank_files[0], filesystem=fs_wrapper.fs)
-    footer_duration = time.perf_counter() - footer_start
-
-    if columns_to_read.strip().lower() in ("auto", "all", ""):
-        columns_list = first_pq.schema.names
-        logging.info(f"[MAXTEXT] Auto-detected dataset schema columns: {columns_list}")
+    if data_format == "parquet":
+        first_pq = pq.ParquetFile(rank_files[0], filesystem=fs_wrapper.fs)
+        if columns_to_read.strip().lower() in ("auto", "all", ""):
+            columns_list = first_pq.schema.names
+        else:
+            columns_list = [c.strip() for c in columns_to_read.split(",") if c.strip()]
     else:
-        columns_list = [c.strip() for c in columns_to_read.split(",") if c.strip()]
+        columns_list = ["int32_tokens"]
+
+    footer_duration = time.perf_counter() - footer_start
 
     logging.info(
         f"[MAXTEXT] ✅ Schema Discovery Complete in {footer_duration * 1000:.2f} ms "
-        f"({len(columns_list)} columns: {columns_list})"
+        f"({len(columns_list)} columns/fields: {columns_list})"
     )
 
-    # Step 2: MaxText Column Projection Range Read Benchmark
+    # Step 2: MaxText Data Read Benchmark
     logging.info(
-        f"[MAXTEXT] Step 2: Executing Column Projection Range Reads for columns={columns_list} "
+        f"[MAXTEXT] Step 2: Executing {data_format.upper()} Data Reads "
         f"(shuffle_mode={shuffle_mode}, batch_size={batch_size}, max_batches={max_batches})..."
     )
 
@@ -292,50 +317,78 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     batch_durations = []
     shuffle_buffer = []
 
-    # Iterate Parquet shard files lazily and read targeted column row groups
-    for fpath in rank_files:
-        if loaded_batches >= max_batches:
-            break
-
-        parquet_file = pq.ParquetFile(fpath, filesystem=fs_wrapper.fs)
-
-        for rg_idx in range(parquet_file.num_row_groups):
+    if data_format == "parquet":
+        for fpath in rank_files:
             if loaded_batches >= max_batches:
                 break
+            parquet_file = pq.ParquetFile(fpath, filesystem=fs_wrapper.fs)
+            for rg_idx in range(parquet_file.num_row_groups):
+                if loaded_batches >= max_batches:
+                    break
 
-            rg_start = time.perf_counter()
-            # Read only selected columns via GCS Range Reads
-            table = parquet_file.read_row_group(rg_idx, columns=columns_list, use_threads=True)
-            rg_duration = time.perf_counter() - rg_start
+                rg_start = time.perf_counter()
+                table = parquet_file.read_row_group(rg_idx, columns=columns_list, use_threads=True)
+                rg_duration = time.perf_counter() - rg_start
+                batch_dict = {col: table[col].to_numpy() for col in table.column_names}
+
+                if shuffle_mode == "two_stage":
+                    shuffle_buffer.append((batch_dict, table, rg_duration))
+                    if len(shuffle_buffer) < 4 and loaded_batches + len(shuffle_buffer) < max_batches:
+                        continue
+                    import random
+                    idx = random.randint(0, len(shuffle_buffer) - 1)
+                    batch_dict, table, rg_duration = shuffle_buffer.pop(idx)
+
+                now = time.perf_counter()
+                if loaded_batches == 0:
+                    first_batch_time = (now - bench_start) + upfront_index_duration
+                    logging.info(f"[MAXTEXT] Time to First Batch (TTFB): {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
+
+                num_samples = len(table)
+                batch_bytes = sum(arr.nbytes for arr in batch_dict.values())
+                total_samples += num_samples
+                total_feature_bytes += batch_bytes
+                loaded_batches += 1
+                batch_durations.append(rg_duration)
+
+                if loaded_batches % 20 == 0:
+                    logging.info(f"  [MaxText Batch {loaded_batches}/{max_batches}] Read {num_samples} samples ({batch_bytes / (1024 * 1024):.2f} MB)")
+    else:
+        # ArrayRecord Reader logic
+        for fpath in rank_files:
+            if loaded_batches >= max_batches:
+                break
+            reader = array_record_module.ArrayRecordReader(fpath)
+            num_recs = reader.num_records()
+            current_batch = []
             
-            # Simulate MaxText JAX tensor batch creation
-            batch_dict = {col: table[col].to_numpy() for col in table.column_names}
+            for idx in range(num_recs):
+                if loaded_batches >= max_batches:
+                    break
 
-            if shuffle_mode == "two_stage":
-                # Stage 2: Buffer-level In-Memory Shuffling
-                shuffle_buffer.append((batch_dict, table, rg_duration))
-                if len(shuffle_buffer) < 4 and loaded_batches + len(shuffle_buffer) < max_batches:
-                    continue
-                import random
-                idx = random.randint(0, len(shuffle_buffer) - 1)
-                batch_dict, table, rg_duration = shuffle_buffer.pop(idx)
+                b_start = time.perf_counter()
+                raw_bytes = reader.read([idx])[0]
+                tokens = np.frombuffer(raw_bytes, dtype=np.int32)
+                b_duration = time.perf_counter() - b_start
 
-            now = time.perf_counter()
-            if loaded_batches == 0:
-                # Include upfront indexing penalty for TTFB if global shuffle
-                first_batch_time = (now - bench_start) + upfront_index_duration
-                logging.info(f"[MAXTEXT] Time to First Batch (TTFB): {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
+                current_batch.append(tokens)
 
-            num_samples = len(table)
-            batch_bytes = sum(arr.nbytes for arr in batch_dict.values())
-            
-            total_samples += num_samples
-            total_feature_bytes += batch_bytes
-            loaded_batches += 1
-            batch_durations.append(rg_duration)
+                if len(current_batch) >= batch_size:
+                    now = time.perf_counter()
+                    if loaded_batches == 0:
+                        first_batch_time = (now - bench_start) + upfront_index_duration
+                        logging.info(f"[MAXTEXT] Time to First Batch (TTFB): {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
 
-            if loaded_batches % 20 == 0:
-                logging.info(f"  [MaxText Batch {loaded_batches}/{max_batches}] Read {num_samples} samples ({batch_bytes / (1024 * 1024):.2f} MB)")
+                    num_samples = len(current_batch)
+                    batch_bytes = sum(t.nbytes for t in current_batch)
+                    total_samples += num_samples
+                    total_feature_bytes += batch_bytes
+                    loaded_batches += 1
+                    batch_durations.append(b_duration)
+                    current_batch = []
+
+                    if loaded_batches % 20 == 0:
+                        logging.info(f"  [MaxText Batch {loaded_batches}/{max_batches}] Read {num_samples} samples ({batch_bytes / (1024 * 1024):.2f} MB)")
 
     total_duration = (time.perf_counter() - bench_start) + upfront_index_duration
 
@@ -350,17 +403,18 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     p99_batch_ms = (np.percentile(batch_durations, 99) * 1000) if batch_durations else 0.0
 
     logging.info("==================================================================================")
-    logging.info("                    MAXTEXT PARQUET GCS RANGE READ SUMMARY                        ")
+    logging.info(f"               MAXTEXT {data_format.upper()} DATASET READ SUMMARY                 ")
     logging.info("==================================================================================")
+    logging.info(f"Data Format              : {data_format.upper()}")
     logging.info(f"Access Mode              : {access_mode}")
     logging.info(f"Shuffle Mode             : {shuffle_mode}")
     logging.info(f"Dataset Path             : {dataset_path}")
-    logging.info(f"Total Dataset Shards     : {len(parquet_files)} Parquet files")
-    logging.info(f"Target Projected Columns : {columns_list}")
+    logging.info(f"Total Dataset Shards     : {len(shard_files)} files")
+    logging.info(f"Target Projected Fields  : {columns_list}")
     logging.info(f"Total Batches Ingested   : {loaded_batches} batches")
     logging.info(f"Total Samples Ingested   : {total_samples} samples")
     logging.info(f"Payload Data Read Volume : {total_feature_bytes / (1024 * 1024):.2f} MB ({total_feature_bytes / (1024 * 1024 * 1024):.4f} GB)")
-    logging.info(f"Time to First Batch TTFB : {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
+    logging.info(f"Time to First Batch TTFB : {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)" if first_batch_time else "N/A")
     if shuffle_mode == "global":
         logging.info(f"Upfront Index Penalty    : {upfront_index_duration * 1000:.2f} ms ({upfront_index_duration:.2f} s)")
     logging.info(f"Schema Discovery Latency : {footer_duration * 1000:.2f} ms")
@@ -376,9 +430,9 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
 def main():
     args = parse_args()
     logging.info(
-        f"Starting MaxText Parquet Range Read Benchmark: path={args.dataset_path}, mode={args.access_mode}, "
-        f"shuffle_mode={args.shuffle_mode}, columns={args.columns}, batch_size={args.batch_size}, "
-        f"rank={args.rank}/{args.world_size}"
+        f"Starting MaxText Range Read Benchmark: path={args.dataset_path}, format={args.format}, "
+        f"mode={args.access_mode}, shuffle_mode={args.shuffle_mode}, columns={args.columns}, "
+        f"batch_size={args.batch_size}, rank={args.rank}/{args.world_size}"
     )
 
     run_maxtext_parquet_benchmark(
@@ -391,6 +445,7 @@ def main():
         args.rank,
         args.world_size,
         args.shuffle_mode,
+        args.format,
     )
 
 

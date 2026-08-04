@@ -8,5 +8,7 @@ data:
 {{ .Files.Get "maxtext_parquet_bench.py" | indent 4 }}
   dataset_generator.py: |-
 {{ .Files.Get "dataset_generator.py" | indent 4 }}
+  parquet_to_arrayrecord.py: |-
+{{ .Files.Get "parquet_to_arrayrecord.py" | indent 4 }}
   requirements.txt: |-
 {{ .Files.Get "requirements.txt" | indent 4 }}

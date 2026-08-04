@@ -71,6 +71,10 @@ spec:
                 value: "{{ $root.Values.workload.accessMode }}"
               - name: SHUFFLE_MODE
                 value: "{{ $root.Values.workload.shuffleMode }}"
+              - name: DATASET_FORMAT
+                value: "{{ $root.Values.workload.datasetFormat }}"
+              - name: CONVERT_TO_ARRAYRECORD
+                value: "{{ $root.Values.workload.convertToArrayRecord }}"
               - name: COLUMNS
                 value: "{{ $root.Values.workload.columns }}"
               - name: BATCH_SIZE
@@ -96,6 +100,9 @@ spec:
               - name: workload-configuration
                 mountPath: /workload/dataset_generator.py
                 subPath: dataset_generator.py
+              - name: workload-configuration
+                mountPath: /workload/parquet_to_arrayrecord.py
+                subPath: parquet_to_arrayrecord.py
               - name: workload-configuration
                 mountPath: /workload/requirements.txt
                 subPath: requirements.txt

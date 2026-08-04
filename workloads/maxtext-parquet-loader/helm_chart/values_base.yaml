@@ -1,7 +1,9 @@
 workload:
   nodes: 1
-  accessMode: "native_gcs"  # choices: "native_gcs" or "gcsfuse"
-  shuffleMode: "none"       # choices: "none", "two_stage", "global"
+  accessMode: "native_gcs"      # choices: "native_gcs" or "gcsfuse"
+  shuffleMode: "none"           # choices: "none", "two_stage", "global"
+  datasetFormat: "parquet"      # choices: "parquet" or "arrayrecord"
+  convertToArrayRecord: false   # set to true to run Parquet->ArrayRecord converter first
   columns: "input_ids,label"
   batchSize: 64
   maxBatches: 100

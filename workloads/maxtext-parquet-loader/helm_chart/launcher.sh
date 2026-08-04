@@ -5,6 +5,8 @@ echo "=== MaxText Parquet Dataset Loading & GCS Range Read Launcher ==="
 echo "DATASET_PATH: ${DATASET_PATH}"
 echo "ACCESS_MODE: ${ACCESS_MODE:-auto}"
 echo "SHUFFLE_MODE: ${SHUFFLE_MODE:-none}"
+echo "DATASET_FORMAT: ${DATASET_FORMAT:-parquet}"
+echo "CONVERT_TO_ARRAYRECORD: ${CONVERT_TO_ARRAYRECORD:-false}"
 echo "COLUMNS: ${COLUMNS:-input_ids,label}"
 echo "BATCH_SIZE: ${BATCH_SIZE:-64}"
 echo "MAX_BATCHES: ${MAX_BATCHES:-100}"
@@ -31,9 +33,23 @@ if [ "${GENERATE_DATASET}" = "true" ]; then
     --metadata-bytes-per-row="${METADATA_BYTES:-4096}"
 fi
 
-echo "--> Executing MaxText Parquet GCS Range Read Benchmark..."
+if [ "${CONVERT_TO_ARRAYRECORD}" = "true" ]; then
+  echo "--> Converting Parquet dataset at ${DATASET_PATH} to ArrayRecord dataset..."
+  python3 /workload/parquet_to_arrayrecord.py \
+    --input-path="${DATASET_PATH}" \
+    --output-path="${DATASET_PATH}_arrayrecord" \
+    --sequence-length="${SEQUENCE_LENGTH:-2048}"
+fi
+
+BENCH_PATH="${DATASET_PATH}"
+if [ "${DATASET_FORMAT}" = "arrayrecord" ]; then
+  BENCH_PATH="${DATASET_PATH}_arrayrecord"
+fi
+
+echo "--> Executing MaxText Range Read Benchmark (format=${DATASET_FORMAT:-parquet})..."
 python3 /workload/maxtext_parquet_bench.py \
-  --dataset-path="${DATASET_PATH}" \
+  --dataset-path="${BENCH_PATH}" \
+  --format="${DATASET_FORMAT:-parquet}" \
   --access-mode="${ACCESS_MODE:-auto}" \
   --shuffle-mode="${SHUFFLE_MODE:-none}" \
   --columns="${COLUMNS:-input_ids,label}" \
