@@ -124,13 +124,17 @@ def convert_parquet_to_arrayrecord(input_path, output_path, text_column="text", 
 
     for idx, fpath in enumerate(parquet_files):
         shard_start = time.perf_counter()
+        shard_filename = f"shard-{idx:05d}-of-{len(parquet_files):05d}.array_record"
+        
         if is_native_gcs:
-            out_file = f"{clean_output}/shard-{idx:05d}-of-{len(parquet_files):05d}.array_record"
+            local_tmp_path = os.path.join("/tmp", shard_filename)
+            out_gcs_file = f"{clean_output}/{shard_filename}"
         else:
-            out_file = os.path.join(clean_output, f"shard-{idx:05d}-of-{len(parquet_files):05d}.array_record")
+            local_tmp_path = os.path.join(clean_output, shard_filename)
+            out_gcs_file = None
 
         parquet_file = pq.ParquetFile(fpath, filesystem=fs if is_native_gcs else None)
-        writer = array_record_module.ArrayRecordWriter(out_file, options="group_size:1")
+        writer = array_record_module.ArrayRecordWriter(local_tmp_path, options="group_size:1")
 
         shard_records = 0
         for rg_idx in range(parquet_file.num_row_groups):
@@ -154,9 +158,15 @@ def convert_parquet_to_arrayrecord(input_path, output_path, text_column="text", 
                 total_bytes += len(raw_bytes)
 
         writer.close()
+
+        if is_native_gcs and out_gcs_file:
+            with open(local_tmp_path, "rb") as lf, fs.open_output_stream(out_gcs_file) as gf:
+                gf.write(lf.read())
+            os.remove(local_tmp_path)
+
         shard_duration = time.perf_counter() - shard_start
         total_records += shard_records
-        logging.info(f"  [Shard {idx+1}/{len(parquet_files)}] Converted {shard_records} records in {shard_duration:.2f}s -> {out_file}")
+        logging.info(f"  [Shard {idx+1}/{len(parquet_files)}] Converted {shard_records} records in {shard_duration:.2f}s -> {output_path}/{shard_filename}")
 
     total_duration = time.perf_counter() - start_conv
     throughput_mbs = (total_bytes / (1024 * 1024)) / total_duration if total_duration > 0 else 0.0

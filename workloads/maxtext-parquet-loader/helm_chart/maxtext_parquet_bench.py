@@ -358,7 +358,15 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
         for fpath in rank_files:
             if loaded_batches >= max_batches:
                 break
-            reader = array_record_module.ArrayRecordReader(fpath)
+            
+            if access_mode == "native_gcs":
+                local_fpath = f"/tmp/{os.path.basename(fpath)}"
+                with fs.open_input_stream(fpath) as gcs_in, open(local_fpath, "wb") as local_out:
+                    local_out.write(gcs_in.read())
+            else:
+                local_fpath = fpath
+
+            reader = array_record_module.ArrayRecordReader(local_fpath)
             num_recs = reader.num_records()
             current_batch = []
             
@@ -389,6 +397,10 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
 
                     if loaded_batches % 20 == 0:
                         logging.info(f"  [MaxText Batch {loaded_batches}/{max_batches}] Read {num_samples} samples ({batch_bytes / (1024 * 1024):.2f} MB)")
+
+            reader.close()
+            if access_mode == "native_gcs" and os.path.exists(local_fpath):
+                os.remove(local_fpath)
 
     total_duration = (time.perf_counter() - bench_start) + upfront_index_duration
 
