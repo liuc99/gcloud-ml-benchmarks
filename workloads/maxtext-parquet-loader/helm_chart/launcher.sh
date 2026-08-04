@@ -38,7 +38,8 @@ if [ "${CONVERT_TO_ARRAYRECORD}" = "true" ]; then
   python3 /workload/parquet_to_arrayrecord.py \
     --input-path="${DATASET_PATH}" \
     --output-path="${DATASET_PATH}_arrayrecord" \
-    --sequence-length="${SEQUENCE_LENGTH:-2048}"
+    --sequence-length="${SEQUENCE_LENGTH:-2048}" \
+    --max-files="${NUM_FILES:-5}"
 fi
 
 BENCH_PATH="${DATASET_PATH}"
