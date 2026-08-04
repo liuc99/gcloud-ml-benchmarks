@@ -1,19 +1,32 @@
-# gcloud-ml-benchmarks
+# gcloud-ml-benchmarks: AI Agent-Driven ML Storage Benchmark & PoC Suite
 
-A unified benchmarking suite for evaluating high-throughput Machine Learning I/O performance on Google Cloud Platform (GCP) and Google Kubernetes Engine (GKE).
+A unified, AI Agent-driven benchmarking and PoC harness for evaluating high-throughput Machine Learning I/O performance on Google Cloud Platform (GCP) and Google Kubernetes Engine (GKE).
 
-This repository measures dataset loading, array I/O, and model checkpointing performance across various storage backends, client protocols, and file system mounts.
+This open-source suite empowers GCP ML developers, data engineers, and AI Agent assistants to interactively trigger real-world ML training Demos, PoCs, and I/O performance benchmarks across **Google Cloud Storage (GCSFuse & `gcsfs`)** and **Google Cloud Managed Lustre**.
 
 ---
 
-## 🎯 Supported Workloads & Storage Backends
+## 🎯 Supported Storage Systems & Workloads
 
-| Workload | Backend / Storage Mount | Description | Key Metrics Evaluated |
-| :--- | :--- | :--- | :--- |
-| **`tensorstore-gcsfuse`** | GCSFuse CSI Driver (Zarr / TensorStore) | Multi-node distributed read & write benchmarks of multi-dimensional Zarr arrays over GCSFuse (and TensorStore drivers). | Cluster Read/Write Throughput (up to 1.35 Tbps), MTU 8896 vs 1500 tuning, HTTP/1.1 vs gRPC protocol impact. |
-| **`hf-pytorch-lightning-cpu`** (Lustre) | Google Cloud Managed Lustre (`LustreCsiDriver`) | PyTorch DDP model training & checkpointing over high-performance Managed Lustre Parallel File System. | Restore I/O speed, Checkpoint save time, PyTorch DDL throughput on Lustre. |
-| **`hf-pytorch-lightning-cpu`** (GCSFuse) | GCSFuse CSI Driver (`GcsFuseCsiDriver`) | PyTorch DDP training & checkpointing reading/writing directly via GCSFuse sidecar mounts. | Streaming write throughput, checkpoint saving, dataset loading over GCS. |
-| **`hf-pytorch-lightning-cpu`** (GCSFS) | FSSpec / GCSFS Python Client | Native Python `gcsfs` file system interface for PyTorch checkpointing and dataset staging. | `gcsfs` chunk size efficiency, Python GIL impact, raw GCS HTTP API latency. |
+### 💾 Primary Storage Systems:
+1. **Google Cloud Storage (GCS)**: Evaluated via **GCSFuse Streaming Writes** (`GcsFuseCsiDriver`) and native Python **`gcsfs` REST API**.
+2. **Google Cloud Managed Lustre**: High-performance parallel file system evaluated via `LustreCsiDriver`.
+
+### 🚀 Workload Harnesses:
+- **PyTorch DDP (`hf-pytorch-lightning-cpu`)**: Simulates Llama 3.1 8B multi-node distributed training, dataset streaming, and 45 GB model state dict checkpointing.
+- **TensorStore / Zarr (`tensorstore-gcsfuse`)**: Multi-node array read/write benchmark evaluating chunking, concurrency, network MTU tuning, and gRPC streaming.
+- *(Extensible)* Architecture designed for easily plugging in future ML frameworks (e.g. JAX, MaxText, Ray, vLLM).
+
+---
+
+## 🤖 AI Agent Automated Benchmarking (Modular AI Agent Skills)
+
+This repository includes a suite of modular, cross-platform **AI Agent Skills** (located in `skills/` and `.gemini/skills/`):
+
+- 🎯 **`ml-benchmark-orchestrator`**: Master orchestrator. **Interactively interviews the user first** to clarify workload, storage backend, resource preferences, iterations, and custom flags before taking any action.
+- ☁️ **`gcp-resource-provisioner`**: Auto-discovers or provisions GKE clusters, Managed Lustre PVCs, GCS buckets, and Workload Identity IAM bindings.
+- 🚀 **`helm-workload-runner`**: Dynamically constructs Helm commands, deploys benchmark releases, monitors Pod execution asynchronously, and tears down releases.
+- 📊 **`benchmark-metrics-parser`**: Parses container stdout logs via `parse_metrics.py` to extract MB/s throughput, latency, and duration metrics into Markdown reports.
 
 ---
 
@@ -27,6 +40,11 @@ gcloud-ml-benchmarks/
 │   ├── macrobenchmarks-cloudbuild.yaml          # Runs gcsfs tests
 │   ├── macrobenchmarks-ingestion-cloudbuild.yaml
 │   └── scripts/                 # Helm, GKE cluster provisioning, Lustre PVC setup scripts
+├── skills/                      # Modular AI Agent Skills for benchmark automation
+│   ├── ml-benchmark-orchestrator/ # Master orchestrator & interactive user interview
+│   ├── gcp-resource-provisioner/ # GKE, Lustre PVC, GCS bucket & IAM setup
+│   ├── helm-workload-runner/   # Dynamic Helm execution, async tracking & teardown
+│   └── benchmark-metrics-parser/# Empirical log parsing & Markdown report generator
 ├── workloads/                   # Benchmark workload definitions & Helm charts
 │   ├── tensorstore-gcsfuse/     # TensorStore multi-node array I/O harness
 │   │   └── helm_chart/
@@ -53,11 +71,16 @@ gcloud-ml-benchmarks/
   * [**Network MTU Tuning (8896 Jumbo Frames vs 1500 MTU)**](docs/tensorstore/results/network_mtu.md)
   * [**Client Protocols (HTTP/1.1 vs gRPC)**](docs/tensorstore/results/client_protocols.md)
   * [**Zarr Chunk Size & Slicing Latency**](docs/tensorstore/results/chunk_size_and_file_size.md)
-  * [**Worker Concurrency & Mount Tuning**](docs/tensorstore/results/concurrency_and_mount_tuning.md)
+  * [**GCSFuse Memory Block Buffer Tuning**](docs/tensorstore/results/global_max_blocks.md)
+  * [**Worker Process Concurrency**](docs/tensorstore/results/process_concurrency.md)
+  * [**Thread Concurrency & I/O Parallelism**](docs/tensorstore/results/thread_concurrency.md)
 
 * 🔥 **PyTorch Benchmarks**:
   * [**PyTorch Documentation Index**](docs/pytorch/README.md)
   * [**Step-by-Step Reproduction Guide (Managed Lustre, GCSFuse, gcsfs)**](docs/pytorch/step_by_step_guide.md)
+  * [**Storage Backends Comparison (Lustre vs GCSFuse vs gcsfs)**](docs/pytorch/results/storage_backends.md)
+  * [**Model Checkpointing Performance & Streaming**](docs/pytorch/results/checkpoint_performance.md)
+  * [**Rank Topology & RAM OOM Prevention**](docs/pytorch/results/rank_scaling_and_memory.md)
 
 ---
 
