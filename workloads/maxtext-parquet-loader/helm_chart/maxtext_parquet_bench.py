@@ -233,34 +233,27 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     rank_files = parquet_files[rank::world_size]
     logging.info(f"[MAXTEXT] [Rank {rank}/{world_size}] Assigned {len(rank_files)} Parquet shards")
 
-    # Step 1: Measure Parquet Metadata / Footer Range Read Overhead
-    logging.info("[MAXTEXT] Step 1: Measuring Parquet Footer & Metadata Range Read Latency...")
+    # Step 1: MaxText Schema Auto-Discovery & Row Group Range Read Setup
+    logging.info("[MAXTEXT] Step 1: Initializing Parquet Schema Discovery & Dataset Shard Reader...")
     footer_start = time.perf_counter()
-    total_rows = 0
 
-    from concurrent.futures import ThreadPoolExecutor
-
-    def get_meta(fp):
-        m = pq.read_metadata(fp, filesystem=fs_wrapper.fs)
-        return fp, m
-
-    parquet_metadatas = []
-    with ThreadPoolExecutor(max_workers=16) as executor:
-        results = executor.map(get_meta, rank_files)
-        for fpath, meta in results:
-            parquet_metadatas.append((fpath, meta))
-            total_rows += meta.num_rows
-
+    first_pq = pq.ParquetFile(rank_files[0], filesystem=fs_wrapper.fs)
     footer_duration = time.perf_counter() - footer_start
 
+    if columns_to_read.strip().lower() in ("auto", "all", ""):
+        columns_list = first_pq.schema.names
+        logging.info(f"[MAXTEXT] Auto-detected dataset schema columns: {columns_list}")
+    else:
+        columns_list = [c.strip() for c in columns_to_read.split(",") if c.strip()]
+
     logging.info(
-        f"[MAXTEXT] ✅ Footer Parse Complete: {len(rank_files)} files parsed in {footer_duration * 1000:.2f} ms "
-        f"(Total dataset rows discovered: {total_rows})"
+        f"[MAXTEXT] ✅ Schema Discovery Complete in {footer_duration * 1000:.2f} ms "
+        f"({len(columns_list)} columns: {columns_list})"
     )
 
     # Step 2: MaxText Column Projection Range Read Benchmark
     logging.info(
-        f"[MAXTEXT] Step 2: Executing Column Projection Range Reads for columns={columns_to_read} "
+        f"[MAXTEXT] Step 2: Executing Column Projection Range Reads for columns={columns_list} "
         f"(batch_size={batch_size}, max_batches={max_batches})..."
     )
 
@@ -271,16 +264,8 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     total_samples = 0
     total_feature_bytes = 0
 
-    if columns_to_read.strip().lower() in ("auto", "all", ""):
-        # Auto-detect column names from first parquet file schema
-        first_pq = pq.ParquetFile(rank_files[0], filesystem=fs_wrapper.fs)
-        columns_list = first_pq.schema.names
-        logging.info(f"[MAXTEXT] Auto-detected dataset schema columns: {columns_list}")
-    else:
-        columns_list = [c.strip() for c in columns_to_read.split(",") if c.strip()]
-
-    # Iterate Parquet files and read targeted column row groups
-    for fpath, meta in parquet_metadatas:
+    # Iterate Parquet shard files lazily and read targeted column row groups
+    for fpath in rank_files:
         if loaded_batches >= max_batches:
             break
 
