@@ -13,6 +13,7 @@ This open-source suite empowers GCP ML developers, data engineers, and AI Agent 
 2. **Google Cloud Managed Lustre**: High-performance parallel file system evaluated via `LustreCsiDriver`.
 
 ### 🚀 Workload Harnesses:
+- **MaxText Parquet GCS Range Reads (`maxtext-parquet-loader`)**: MaxText JAX LLM training input pipeline benchmark evaluating Parquet column projection and GCS Range Reads over **Native GCS Client (`gs://...`)** and **GCSFuse Sidecar (`/gcs/...`)**.
 - **Dataset Loading (`dataset-loading`)**: Standalone and multi-node dataset streaming benchmark evaluating Parquet, WebDataset TAR, Zarr/TensorStore, PyTorch `.pt`, and JSONL ingestion throughput, TTFB, and latency percentiles.
 - **PyTorch DDP (`hf-pytorch-lightning-cpu`)**: Simulates Llama 3.1 8B multi-node distributed training, dataset streaming, and 45 GB model state dict checkpointing.
 - **TensorStore / Zarr (`tensorstore-gcsfuse`)**: Multi-node array read/write benchmark evaluating chunking, concurrency, network MTU tuning, and gRPC streaming.
@@ -47,6 +48,8 @@ gcloud-ml-benchmarks/
 │   ├── helm-workload-runner/   # Dynamic Helm execution, async tracking & teardown
 │   └── benchmark-metrics-parser/# Empirical log parsing & Markdown report generator
 ├── workloads/                   # Benchmark workload definitions & Helm charts
+│   ├── maxtext-parquet-loader/  # MaxText Parquet GCS Range Read benchmark & demo
+│   │   └── helm_chart/
 │   ├── dataset-loading/         # ML dataset streaming & ingestion benchmark harness
 │   │   └── helm_chart/          # Synthetic dataset generator & loading benchmark
 │   ├── tensorstore-gcsfuse/     # TensorStore multi-node array I/O harness
@@ -55,6 +58,9 @@ gcloud-ml-benchmarks/
 │       └── helm_chart/
 └── docs/                        # Documentation suite organized by benchmark workload
     ├── README.md                # Master documentation index
+    ├── maxtext/                 # MaxText Parquet GCS Range Read suite
+    │   ├── README.md            # Workload overview & range read architecture
+    │   └── parquet_range_reads_guide.md # Manual reproduction guide (Native GCS & GCSFuse)
     ├── dataset_loading/         # ML dataset loading benchmark suite
     │   ├── README.md            # Workload overview & format matrix
     │   └── step_by_step_guide.md# Manual reproduction guide
@@ -69,6 +75,10 @@ gcloud-ml-benchmarks/
 ---
 
 ## 🚀 Quick Links & Documentation
+
+* ⚡ **MaxText Parquet GCS Range Read Benchmarks**:
+  * [**MaxText Documentation Index**](docs/maxtext/README.md)
+  * [**Parquet Range Reads Guide (Native GCS vs GCSFuse)**](docs/maxtext/parquet_range_reads_guide.md)
 
 * 📥 **Dataset Loading Benchmarks**:
   * [**Dataset Loading Documentation Index**](docs/dataset_loading/README.md)

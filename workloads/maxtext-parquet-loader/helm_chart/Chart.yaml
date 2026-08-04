@@ -1,0 +1,6 @@
+apiVersion: v2
+name: maxtext-parquet-loader
+description: Helm chart for MaxText Parquet dataset reading & GCS Range Read benchmark on GKE (supporting Native GCS and GCSFuse).
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

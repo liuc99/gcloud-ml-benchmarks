@@ -1,0 +1,105 @@
+# yamllint disable
+{{- $root := . -}}
+{{ $timestamp := now | date "2006-01-02-15-04-05" }}
+{{ $nodes := .Values.workload.nodes }}
+
+apiVersion: jobset.x-k8s.io/v1alpha2
+kind: JobSet
+metadata:
+  name: "{{ .Release.Name }}"
+  namespace: default
+spec:
+  failurePolicy:
+    maxRestarts: 0
+  replicatedJobs:
+  - name: workload
+    replicas: 1
+    template:
+      spec:
+        parallelism: {{ $nodes }}
+        completions: {{ $nodes }}
+        backoffLimit: 0
+        completionMode: Indexed
+        ttlSecondsAfterFinished: 43200
+        template:
+          metadata:
+            name: {{ .Release.Name }}
+            annotations:
+              kubectl.kubernetes.io/default-container: workload
+              {{- if $root.Values.gcsfuse.enabled }}
+              gke-gcsfuse/volumes: "true"
+              {{- end }}
+          spec:
+            serviceAccountName: {{ $root.Values.serviceAccount | default "default" }}
+            subdomain: "{{ .Release.Name }}"
+            restartPolicy: Never
+            {{- if $root.Values.nodeSelector }}
+            nodeSelector:
+              {{- toYaml $root.Values.nodeSelector | nindent 14 }}
+            {{- end }}
+            volumes:
+            - name: workload-configuration
+              configMap:
+                name: "{{ .Release.Name }}-config"
+            - name: workload-launcher
+              configMap:
+                name: "{{ .Release.Name }}-launcher"
+                defaultMode: 0755
+            {{- if $root.Values.gcsfuse.enabled }}
+            - name: gcsfuse-dataset
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                volumeAttributes:
+                  bucketName: "{{ $root.Values.gcsfuse.datasetBucket }}"
+                  mountOptions: "{{ $root.Values.gcsfuse.mountOptions }}"
+            {{- end }}
+            containers:
+            - name: workload
+              image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+              imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+              command: ["/bin/bash", "/workload/launcher/launcher.sh"]
+              env:
+              - name: RANK
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+              - name: WORLD_SIZE
+                value: "{{ $nodes }}"
+              - name: DATASET_PATH
+                value: "{{ $root.Values.gcsfs.datasetPath }}"
+              - name: ACCESS_MODE
+                value: "{{ $root.Values.workload.accessMode }}"
+              - name: COLUMNS
+                value: "{{ $root.Values.workload.columns }}"
+              - name: BATCH_SIZE
+                value: "{{ $root.Values.workload.batchSize }}"
+              - name: MAX_BATCHES
+                value: "{{ $root.Values.workload.maxBatches }}"
+              - name: NUM_THREADS
+                value: "{{ $root.Values.workload.numThreads }}"
+              - name: GENERATE_DATASET
+                value: "{{ $root.Values.workload.generateDataset }}"
+              - name: DATASET_SIZE_MB
+                value: "{{ $root.Values.workload.datasetSizeMb }}"
+              - name: NUM_FILES
+                value: "{{ $root.Values.workload.numFiles }}"
+              - name: SEQUENCE_LENGTH
+                value: "{{ $root.Values.workload.sequenceLength }}"
+              - name: METADATA_BYTES
+                value: "{{ $root.Values.workload.metadataBytes }}"
+              volumeMounts:
+              - name: workload-configuration
+                mountPath: /workload/maxtext_parquet_bench.py
+                subPath: maxtext_parquet_bench.py
+              - name: workload-configuration
+                mountPath: /workload/dataset_generator.py
+                subPath: dataset_generator.py
+              - name: workload-configuration
+                mountPath: /workload/requirements.txt
+                subPath: requirements.txt
+              - name: workload-launcher
+                mountPath: /workload/launcher
+              {{- if $root.Values.gcsfuse.enabled }}
+              - name: gcsfuse-dataset
+                mountPath: /gcs/dataset
+              {{- end }}

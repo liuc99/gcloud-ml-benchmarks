@@ -1,0 +1,28 @@
+workload:
+  nodes: 1
+  accessMode: "native_gcs"  # choices: "native_gcs" or "gcsfuse"
+  columns: "input_ids,label"
+  batchSize: 64
+  maxBatches: 100
+  numThreads: 4
+  generateDataset: false
+  datasetSizeMb: 1024
+  numFiles: 10
+  sequenceLength: 2048
+  metadataBytes: 4096
+
+gcsfs:
+  datasetPath: "gs://my-bucket/maxtext_parquet"
+
+gcsfuse:
+  enabled: false
+  datasetBucket: ""
+  mountOptions: "implicit-dirs,file-cache:max-size-mb:-1,file-cache:cache-file-for-range-read:true"
+
+image:
+  repository: "python"
+  tag: "3.11-slim"
+  pullPolicy: "IfNotPresent"
+
+nodeSelector:
+  cloud.google.com/gke-nodepool: default-pool
