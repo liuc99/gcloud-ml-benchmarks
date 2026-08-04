@@ -1,11 +1,11 @@
 ---
 name: maxtext-dataset-benchmark
-description: Skill for running MaxText dataset loading demos with flexible format selection (Parquet or ArrayRecord), optional Parquet-to-ArrayRecord preprocessing, and shuffle strategy benchmarking on GKE.
+description: Skill for running MaxText dataset loading demos with flexible format selection (Parquet or ArrayRecord), optional Parquet-to-ArrayRecord preprocessing, and shuffle strategy benchmarking (none, two_stage, global) on GKE.
 ---
 
 # MaxText Dataset Benchmark & Conversion Skill (`maxtext-dataset-benchmark`)
 
-This skill enables an AI Agent to execute MaxText dataset loading demos on GKE using **either Parquet or ArrayRecord** formats. 
+This skill enables an AI Agent to execute MaxText dataset loading demos on GKE using **either Parquet or ArrayRecord** formats and compare **different shuffle strategies (`none`, `two_stage`, `global`)**. 
 
 If a user provides a Parquet dataset and wants to test or evaluate ArrayRecord, an optional conversion tool (`parquet_to_arrayrecord.py`) is provided to pre-tokenize and convert Parquet shards into ArrayRecord before running the benchmark.
 
@@ -87,6 +87,46 @@ helm install maxtext-demo-run . \
 
 ---
 
+## 🔀 Shuffle Strategy Comparative Evaluation Protocol
+
+When requested to compare or evaluate the performance impact of **different shuffle strategies** (`none`, `two_stage`, `global`):
+
+### Supported Shuffle Modes Matrix
+
+| Shuffle Mode | Implementation Mechanism | Parquet Upfront Penalty | ArrayRecord Upfront Penalty | Typical Use Case |
+| :--- | :--- | :--- | :--- | :--- |
+| **`none`** | Natural shard file order | 0 ms | 0 ms | Baseline throughput testing |
+| **`two_stage`** (Recommended) | Shard order shuffle + Batch buffer sliding window | 0 ms | 0 ms | Production pre-training (Fast startup + ~90% randomness) |
+| **`global`** | Upfront scanning all shard footers for true random point-reads | **~91 秒** (1,600+ network RTTs) | **~30 ms** (O(1) C++ index table) | Fine-tuning / Annealing (100% true random sample distribution) |
+
+### Executing a Multi-Strategy Comparative Matrix Loop
+
+Run the benchmark iterations sequentially across shuffle modes for a given format (`FORMAT=parquet` or `FORMAT=arrayrecord`):
+
+```bash
+for SHUFFLE in "none" "two_stage" "global"; do
+  echo ">>> Running Benchmark: format=${FORMAT}, shuffle=${SHUFFLE}"
+  helm install maxtext-demo-run . \
+    --set gcsfs.datasetPath="${DATASET_PATH}" \
+    --set workload.datasetFormat="${FORMAT}" \
+    --set workload.convertToArrayRecord=false \
+    --set workload.shuffleMode="${SHUFFLE}" \
+    --set workload.batchSize=64 \
+    --set workload.maxBatches=100
+
+  # Monitor pod completion
+  kubectl wait --for=condition=Ready pod -l jobset.sigs.k8s.io/jobset-name=maxtext-demo-run --timeout=120s
+  
+  # Collect logs & summary metrics
+  kubectl logs -l jobset.sigs.k8s.io/jobset-name=maxtext-demo-run -c workload --tail=30
+  
+  # Uninstall before next iteration
+  helm uninstall maxtext-demo-run
+done
+```
+
+---
+
 ## 📊 Milestone Monitoring & Performance Validation
 
 Monitor pod execution and parse summary logs:
@@ -101,6 +141,7 @@ kubectl logs pod/${POD_NAME} --tail=40
 
 Verify key metrics in output:
 - **Data Format**: `PARQUET` vs `ARRAYRECORD`
+- **Shuffle Mode**: `none`, `two_stage`, vs `global`
 - **Time to First Batch (TTFB)** (ms)
 - **Upfront Index Scanning Penalty** (ms)
 - **Batch Load Latency Percentiles** (`p50`, `p95`, `p99` ms)
