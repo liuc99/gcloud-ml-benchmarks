@@ -172,9 +172,13 @@ def convert_parquet_to_arrayrecord(input_path, output_path, text_column="text", 
                 "Authorization": f"Bearer {credentials.token}",
                 "Content-Type": "application/octet-stream",
             }
-            url = f"https://storage.googleapis.com/upload/storage/v1/b/{bucket_name}/o?uploadType=media&name={blob_name}"
+            url = f"https://storage.googleapis.com/upload/storage/v1/b/{bucket_name}/o"
+            params = {
+                "uploadType": "media",
+                "name": blob_name,
+            }
             with open(local_tmp_path, "rb") as f:
-                resp = requests.post(url, headers=headers, data=f)
+                resp = requests.post(url, params=params, headers=headers, data=f)
                 resp.raise_for_status()
             os.remove(local_tmp_path)
 
