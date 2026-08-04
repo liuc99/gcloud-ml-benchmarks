@@ -361,8 +361,11 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
             
             if access_mode == "native_gcs":
                 local_fpath = f"/tmp/{os.path.basename(fpath)}"
-                with fs.open_input_stream(fpath) as gcs_in, open(local_fpath, "wb") as local_out:
-                    local_out.write(gcs_in.read())
+                import gcsfs
+                gcs_fs = gcsfs.GCSFileSystem()
+                clean_fpath = fpath.replace("gs://", "")
+                logging.info(f"[MAXTEXT] [ARRAYRECORD] Streaming/Downloading shard {clean_fpath} -> {local_fpath}...")
+                gcs_fs.get_file(clean_fpath, local_fpath)
             else:
                 local_fpath = fpath
 
