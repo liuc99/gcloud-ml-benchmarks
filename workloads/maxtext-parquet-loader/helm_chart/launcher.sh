@@ -37,14 +37,14 @@ if [ "${CONVERT_TO_ARRAYRECORD}" = "true" ]; then
   echo "--> Converting Parquet dataset at ${DATASET_PATH} to ArrayRecord dataset..."
   python3 /workload/parquet_to_arrayrecord.py \
     --input-path="${DATASET_PATH}" \
-    --output-path="${DATASET_PATH}_arrayrecord" \
+    --output-path="${DATASET_PATH}/arrayrecord_dataset" \
     --sequence-length="${SEQUENCE_LENGTH:-2048}" \
     --max-files="${NUM_FILES:-5}"
 fi
 
 BENCH_PATH="${DATASET_PATH}"
 if [ "${DATASET_FORMAT}" = "arrayrecord" ]; then
-  BENCH_PATH="${DATASET_PATH}_arrayrecord"
+  BENCH_PATH="${DATASET_PATH}/arrayrecord_dataset"
 fi
 
 echo "--> Executing MaxText Range Read Benchmark (format=${DATASET_FORMAT:-parquet})..."
