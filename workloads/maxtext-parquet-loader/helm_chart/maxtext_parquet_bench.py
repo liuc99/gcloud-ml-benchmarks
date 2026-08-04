@@ -237,13 +237,19 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     logging.info("[MAXTEXT] Step 1: Measuring Parquet Footer & Metadata Range Read Latency...")
     footer_start = time.perf_counter()
     total_rows = 0
-    total_file_size_bytes = 0
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def get_meta(fp):
+        m = pq.read_metadata(fp, filesystem=fs_wrapper.fs)
+        return fp, m
 
     parquet_metadatas = []
-    for fpath in rank_files:
-        meta = pq.read_metadata(fpath, filesystem=fs_wrapper.fs)
-        parquet_metadatas.append((fpath, meta))
-        total_rows += meta.num_rows
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        results = executor.map(get_meta, rank_files)
+        for fpath, meta in results:
+            parquet_metadatas.append((fpath, meta))
+            total_rows += meta.num_rows
 
     footer_duration = time.perf_counter() - footer_start
 
