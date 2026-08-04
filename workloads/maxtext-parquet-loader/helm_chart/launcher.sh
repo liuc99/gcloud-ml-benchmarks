@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+export PYTHONUNBUFFERED=1
 
 echo "=== MaxText Parquet Dataset Loading & GCS Range Read Launcher ==="
 echo "DATASET_PATH: ${DATASET_PATH}"

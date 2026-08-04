@@ -161,54 +161,13 @@ def convert_parquet_to_arrayrecord(input_path, output_path, text_column="text", 
         writer.close()
 
         if is_native_gcs and out_gcs_file:
-            uploaded = False
-            # 1. Try gcloud storage cp (supports RAPID appendable zonal buckets via gRPC)
-            try:
-                res = subprocess.run(["gcloud", "storage", "cp", local_tmp_path, out_gcs_file], capture_output=True, text=True)
-                if res.returncode == 0:
-                    logging.info(f"  [GCS UPLOAD] Successfully copied via gcloud storage cp to {out_gcs_file}")
-                    uploaded = True
-                else:
-                    logging.warning(f"  [GCS UPLOAD] gcloud storage cp failed ({res.returncode}): {res.stderr.strip()}")
-            except Exception as e:
-                logging.warning(f"  [GCS UPLOAD] gcloud storage cp execution exception: {e}")
+            import gcsfs
 
-            # 2. Try gsutil cp if gcloud failed
-            if not uploaded:
-                try:
-                    res = subprocess.run(["gsutil", "cp", local_tmp_path, out_gcs_file], capture_output=True, text=True)
-                    if res.returncode == 0:
-                        logging.info(f"  [GCS UPLOAD] Successfully copied via gsutil cp to {out_gcs_file}")
-                        uploaded = True
-                    else:
-                        logging.warning(f"  [GCS UPLOAD] gsutil cp failed ({res.returncode}): {res.stderr.strip()}")
-                except Exception as e:
-                    logging.warning(f"  [GCS UPLOAD] gsutil cp execution exception: {e}")
-
-            # 3. Fallback to HTTP POST
-            if not uploaded:
-                import google.auth
-                from google.auth.transport.requests import Request
-                import requests
-
-                gcs_path_no_prefix = out_gcs_file.replace("gs://", "")
-                bucket_name, blob_name = gcs_path_no_prefix.split("/", 1)
-                credentials, _ = google.auth.default()
-                credentials.refresh(Request())
-                headers = {
-                    "Authorization": f"Bearer {credentials.token}",
-                    "Content-Type": "application/octet-stream",
-                }
-                url = f"https://storage.googleapis.com/upload/storage/v1/b/{bucket_name}/o"
-                params = {
-                    "uploadType": "media",
-                    "name": blob_name,
-                }
-                with open(local_tmp_path, "rb") as f:
-                    resp = requests.post(url, params=params, headers=headers, data=f)
-                    if not resp.ok:
-                        logging.error(f"HTTP upload failed: {resp.status_code} {resp.text}")
-                    resp.raise_for_status()
+            gcs_dest = out_gcs_file.replace("gs://", "")
+            logging.info(f"  [GCS UPLOAD] Copying {local_tmp_path} -> {out_gcs_file} via gcsfs...")
+            fs = gcsfs.GCSFileSystem()
+            fs.put(local_tmp_path, gcs_dest)
+            logging.info(f"  [GCS UPLOAD] Upload completed for {out_gcs_file}")
 
             if os.path.exists(local_tmp_path):
                 os.remove(local_tmp_path)
