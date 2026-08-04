@@ -321,7 +321,7 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     logging.info(f"Total Batches Ingested   : {loaded_batches} batches")
     logging.info(f"Total Samples Processed  : {total_samples} samples")
     logging.info(f"Time to First Batch TTFB : {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
-    logging.info(f"Footer Metadata Latency  : {footer_duration * 1000:.2f} ms ({footer_read_count} range requests)")
+    logging.info(f"Schema Discovery Latency : {footer_duration * 1000:.2f} ms")
     logging.info(f"Data GCS Range Requests  : {data_range_requests} requests")
     logging.info(f"GCS Bytes Downloaded     : {data_bytes_read / (1024 * 1024):.2f} MB")
     logging.info(f"Useful Feature Payload   : {total_feature_bytes / (1024 * 1024):.2f} MB")
