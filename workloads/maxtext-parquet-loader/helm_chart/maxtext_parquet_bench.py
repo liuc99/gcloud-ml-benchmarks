@@ -51,6 +51,13 @@ def parse_args():
         help="Batch size per step",
     )
     parser.add_argument(
+        "--shuffle-mode",
+        type=str,
+        default="none",
+        choices=["none", "two_stage", "global"],
+        help="Shuffle mode: 'none' (sequential), 'two_stage' (Grain-style streaming file+buffer shuffle), 'global' (upfront full-index global shuffle)",
+    )
+    parser.add_argument(
         "--max-batches",
         type=int,
         default=100,
@@ -197,7 +204,7 @@ def setup_filesystem(dataset_path, access_mode):
 # -----------------------------------------------------------------------------
 # MaxText Parquet Range Read Pipeline
 # -----------------------------------------------------------------------------
-def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, batch_size, max_batches, num_threads, rank, world_size):
+def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, batch_size, max_batches, num_threads, rank, world_size, shuffle_mode="none"):
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -233,6 +240,25 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     rank_files = parquet_files[rank::world_size]
     logging.info(f"[MAXTEXT] [Rank {rank}/{world_size}] Assigned {len(rank_files)} Parquet shards")
 
+    upfront_index_duration = 0.0
+
+    if shuffle_mode == "two_stage":
+        import random
+        logging.info("[MAXTEXT] [SHUFFLE: TWO_STAGE] Stage 1: Shuffling file shard order deterministically with seed...")
+        random.seed(42 + rank)
+        random.shuffle(rank_files)
+    elif shuffle_mode == "global":
+        logging.info("[MAXTEXT] [SHUFFLE: GLOBAL] Stage 1: Upfront Scanning ALL Parquet footers to build Global Index Map...")
+        idx_start = time.perf_counter()
+        from concurrent.futures import ThreadPoolExecutor
+        def scan_footer(fp):
+            m = pq.read_metadata(fp, filesystem=fs_wrapper.fs)
+            return fp, m.num_rows
+        with ThreadPoolExecutor(max_workers=16) as exec_pool:
+            _ = list(exec_pool.map(scan_footer, rank_files))
+        upfront_index_duration = time.perf_counter() - idx_start
+        logging.info(f"[MAXTEXT] [SHUFFLE: GLOBAL] ⚠️ Upfront Global Index Map Created in {upfront_index_duration:.2f}s ({upfront_index_duration * 1000:.0f} ms penalty!)")
+
     # Step 1: MaxText Schema Auto-Discovery & Row Group Range Read Setup
     logging.info("[MAXTEXT] Step 1: Initializing Parquet Schema Discovery & Dataset Shard Reader...")
     footer_start = time.perf_counter()
@@ -254,7 +280,7 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     # Step 2: MaxText Column Projection Range Read Benchmark
     logging.info(
         f"[MAXTEXT] Step 2: Executing Column Projection Range Reads for columns={columns_list} "
-        f"(batch_size={batch_size}, max_batches={max_batches})..."
+        f"(shuffle_mode={shuffle_mode}, batch_size={batch_size}, max_batches={max_batches})..."
     )
 
     bench_start = time.perf_counter()
@@ -264,6 +290,7 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     total_samples = 0
     total_feature_bytes = 0
     batch_durations = []
+    shuffle_buffer = []
 
     # Iterate Parquet shard files lazily and read targeted column row groups
     for fpath in rank_files:
@@ -284,10 +311,20 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
             # Simulate MaxText JAX tensor batch creation
             batch_dict = {col: table[col].to_numpy() for col in table.column_names}
 
+            if shuffle_mode == "two_stage":
+                # Stage 2: Buffer-level In-Memory Shuffling
+                shuffle_buffer.append((batch_dict, table, rg_duration))
+                if len(shuffle_buffer) < 4 and loaded_batches + len(shuffle_buffer) < max_batches:
+                    continue
+                import random
+                idx = random.randint(0, len(shuffle_buffer) - 1)
+                batch_dict, table, rg_duration = shuffle_buffer.pop(idx)
+
             now = time.perf_counter()
             if loaded_batches == 0:
-                first_batch_time = now - bench_start
-                logging.info(f"[MAXTEXT] Time to First Batch (TTFB): {first_batch_time * 1000:.2f} ms")
+                # Include upfront indexing penalty for TTFB if global shuffle
+                first_batch_time = (now - bench_start) + upfront_index_duration
+                logging.info(f"[MAXTEXT] Time to First Batch (TTFB): {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
 
             num_samples = len(table)
             batch_bytes = sum(arr.nbytes for arr in batch_dict.values())
@@ -300,7 +337,7 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
             if loaded_batches % 20 == 0:
                 logging.info(f"  [MaxText Batch {loaded_batches}/{max_batches}] Read {num_samples} samples ({batch_bytes / (1024 * 1024):.2f} MB)")
 
-    total_duration = time.perf_counter() - bench_start
+    total_duration = (time.perf_counter() - bench_start) + upfront_index_duration
 
     # Effective Feature IO Read Throughput
     throughput_mbs = (total_feature_bytes / (1024 * 1024)) / total_duration if total_duration > 0 else 0.0
@@ -316,6 +353,7 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     logging.info("                    MAXTEXT PARQUET GCS RANGE READ SUMMARY                        ")
     logging.info("==================================================================================")
     logging.info(f"Access Mode              : {access_mode}")
+    logging.info(f"Shuffle Mode             : {shuffle_mode}")
     logging.info(f"Dataset Path             : {dataset_path}")
     logging.info(f"Total Dataset Shards     : {len(parquet_files)} Parquet files")
     logging.info(f"Target Projected Columns : {columns_list}")
@@ -323,6 +361,8 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     logging.info(f"Total Samples Ingested   : {total_samples} samples")
     logging.info(f"Payload Data Read Volume : {total_feature_bytes / (1024 * 1024):.2f} MB ({total_feature_bytes / (1024 * 1024 * 1024):.4f} GB)")
     logging.info(f"Time to First Batch TTFB : {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
+    if shuffle_mode == "global":
+        logging.info(f"Upfront Index Penalty    : {upfront_index_duration * 1000:.2f} ms ({upfront_index_duration:.2f} s)")
     logging.info(f"Schema Discovery Latency : {footer_duration * 1000:.2f} ms")
     logging.info(f"IO Read Throughput       : {throughput_mbs:.2f} MB/s ({throughput_gbps:.2f} Gbps)")
     logging.info(f"Sample Ingestion Speed   : {samples_per_sec:.2f} samples/sec")
@@ -337,7 +377,8 @@ def main():
     args = parse_args()
     logging.info(
         f"Starting MaxText Parquet Range Read Benchmark: path={args.dataset_path}, mode={args.access_mode}, "
-        f"columns={args.columns}, batch_size={args.batch_size}, rank={args.rank}/{args.world_size}"
+        f"shuffle_mode={args.shuffle_mode}, columns={args.columns}, batch_size={args.batch_size}, "
+        f"rank={args.rank}/{args.world_size}"
     )
 
     run_maxtext_parquet_benchmark(
@@ -349,6 +390,7 @@ def main():
         args.num_threads,
         args.rank,
         args.world_size,
+        args.shuffle_mode,
     )
 
 

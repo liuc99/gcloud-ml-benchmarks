@@ -69,6 +69,8 @@ spec:
                 value: "{{ $root.Values.gcsfs.datasetPath }}"
               - name: ACCESS_MODE
                 value: "{{ $root.Values.workload.accessMode }}"
+              - name: SHUFFLE_MODE
+                value: "{{ $root.Values.workload.shuffleMode }}"
               - name: COLUMNS
                 value: "{{ $root.Values.workload.columns }}"
               - name: BATCH_SIZE

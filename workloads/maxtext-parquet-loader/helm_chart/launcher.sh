@@ -4,6 +4,7 @@ set -e
 echo "=== MaxText Parquet Dataset Loading & GCS Range Read Launcher ==="
 echo "DATASET_PATH: ${DATASET_PATH}"
 echo "ACCESS_MODE: ${ACCESS_MODE:-auto}"
+echo "SHUFFLE_MODE: ${SHUFFLE_MODE:-none}"
 echo "COLUMNS: ${COLUMNS:-input_ids,label}"
 echo "BATCH_SIZE: ${BATCH_SIZE:-64}"
 echo "MAX_BATCHES: ${MAX_BATCHES:-100}"
@@ -34,6 +35,7 @@ echo "--> Executing MaxText Parquet GCS Range Read Benchmark..."
 python3 /workload/maxtext_parquet_bench.py \
   --dataset-path="${DATASET_PATH}" \
   --access-mode="${ACCESS_MODE:-auto}" \
+  --shuffle-mode="${SHUFFLE_MODE:-none}" \
   --columns="${COLUMNS:-input_ids,label}" \
   --batch-size="${BATCH_SIZE:-64}" \
   --max-batches="${MAX_BATCHES:-100}" \
