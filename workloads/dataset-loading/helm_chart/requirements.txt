@@ -1,0 +1,9 @@
+pyarrow>=14.0.0
+datasets>=2.16.0
+webdataset>=0.2.86
+tensorstore>=0.1.50
+torch>=2.1.0
+fsspec>=2023.12.0
+gcsfs>=2023.12.0
+numpy>=1.24.0
+tqdm>=4.66.0

@@ -13,6 +13,7 @@ This open-source suite empowers GCP ML developers, data engineers, and AI Agent 
 2. **Google Cloud Managed Lustre**: High-performance parallel file system evaluated via `LustreCsiDriver`.
 
 ### 🚀 Workload Harnesses:
+- **Dataset Loading (`dataset-loading`)**: Standalone and multi-node dataset streaming benchmark evaluating Parquet, WebDataset TAR, Zarr/TensorStore, PyTorch `.pt`, and JSONL ingestion throughput, TTFB, and latency percentiles.
 - **PyTorch DDP (`hf-pytorch-lightning-cpu`)**: Simulates Llama 3.1 8B multi-node distributed training, dataset streaming, and 45 GB model state dict checkpointing.
 - **TensorStore / Zarr (`tensorstore-gcsfuse`)**: Multi-node array read/write benchmark evaluating chunking, concurrency, network MTU tuning, and gRPC streaming.
 - *(Extensible)* Architecture designed for easily plugging in future ML frameworks (e.g. JAX, MaxText, Ray, vLLM).
@@ -46,12 +47,17 @@ gcloud-ml-benchmarks/
 │   ├── helm-workload-runner/   # Dynamic Helm execution, async tracking & teardown
 │   └── benchmark-metrics-parser/# Empirical log parsing & Markdown report generator
 ├── workloads/                   # Benchmark workload definitions & Helm charts
+│   ├── dataset-loading/         # ML dataset streaming & ingestion benchmark harness
+│   │   └── helm_chart/          # Synthetic dataset generator & loading benchmark
 │   ├── tensorstore-gcsfuse/     # TensorStore multi-node array I/O harness
 │   │   └── helm_chart/
 │   └── hf-pytorch-lightning-cpu/ # PyTorch Llama 3.1 8B DDP training & checkpoint harness
 │       └── helm_chart/
 └── docs/                        # Documentation suite organized by benchmark workload
     ├── README.md                # Master documentation index
+    ├── dataset_loading/         # ML dataset loading benchmark suite
+    │   ├── README.md            # Workload overview & format matrix
+    │   └── step_by_step_guide.md# Manual reproduction guide
     ├── tensorstore/             # TensorStore + GCSFuse benchmark suite
     │   ├── step_by_step_guide.md# Manual reproduction guide
     │   └── results/             # Results by dimension (scaling, MTU, protocols, chunks, concurrency)
@@ -63,6 +69,10 @@ gcloud-ml-benchmarks/
 ---
 
 ## 🚀 Quick Links & Documentation
+
+* 📥 **Dataset Loading Benchmarks**:
+  * [**Dataset Loading Documentation Index**](docs/dataset_loading/README.md)
+  * [**Step-by-Step Reproduction Guide**](docs/dataset_loading/step_by_step_guide.md)
 
 * 📦 **TensorStore Benchmarks**:
   * [**TensorStore Documentation Index**](docs/tensorstore/README.md)

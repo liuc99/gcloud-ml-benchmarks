@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Release.Name }}-launcher"
+  namespace: default
+data:
+  launcher.sh: |-
+{{ .Files.Get "launcher.sh" | indent 4 }}

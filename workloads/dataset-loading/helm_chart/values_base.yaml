@@ -1,0 +1,35 @@
+workload:
+  nodes: 1
+  ranksPerNode: 4
+  format: "parquet"
+  reader: "hf_datasets"
+  batchSize: 64
+  numWorkers: 4
+  prefetchFactor: 2
+  maxBatches: 100
+  epochs: 1
+  generateDataset: false
+  datasetSizeMb: 1024
+  numFiles: 10
+  sequenceLength: 512
+  embeddingDim: 768
+
+gcsfs:
+  datasetPath: "gs://my-bucket/dataset"
+
+gcsfuse:
+  enabled: false
+  datasetBucket: ""
+  mountOptions: "implicit-dirs,file-cache:max-size-mb:-1,file-cache:cache-file-for-range-read:true"
+
+lustre:
+  enabled: false
+  checkpointPvc: ""
+
+image:
+  repository: "python"
+  tag: "3.11-slim"
+  pullPolicy: "IfNotPresent"
+
+nodeSelector:
+  cloud.google.com/gke-nodepool: default-pool

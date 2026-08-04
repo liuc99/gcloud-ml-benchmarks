@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Release.Name }}-config"
+  namespace: default
+data:
+  dataset_loading_bench.py: |-
+{{ .Files.Get "dataset_loading_bench.py" | indent 4 }}
+  dataset_generator.py: |-
+{{ .Files.Get "dataset_generator.py" | indent 4 }}
+  requirements.txt: |-
+{{ .Files.Get "requirements.txt" | indent 4 }}
