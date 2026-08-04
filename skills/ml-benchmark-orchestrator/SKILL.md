@@ -1,19 +1,19 @@
 ---
 name: ml-benchmark-orchestrator
-description: Master orchestrator for ML storage benchmarks. Interactively interviews the user, references persistent GCP storage domain knowledge (in references/gcp_ml_storage_reference.md), confirms dataset paths, enforces persistent resource safety guardrails, generates a structured execution plan, and waits for explicit user approval before routing to sub-skills.
+description: Master orchestrator for all ML benchmarks and demos. Interactively interviews the user, confirms dataset locations and format selection (Parquet / ArrayRecord / WebDataset / TensorStore / PyTorch), presents a structured execution plan, and waits for explicit user approval before launching benchmark workloads.
 ---
 
 # ML Benchmark Orchestrator Skill (`ml-benchmark-orchestrator`)
 
-This is the master orchestration skill for ML storage benchmarks on Google Cloud Platform and GKE. It references persistent baseline benchmarks and GCP storage knowledge located in [references/gcp_ml_storage_reference.md](references/gcp_ml_storage_reference.md).
+This is the master orchestration skill for all ML storage, data loader, and model training benchmarks across `gcloud-ml-benchmarks`. It references persistent baseline benchmarks and GCP storage domain knowledge located in [references/gcp_ml_storage_reference.md](references/gcp_ml_storage_reference.md).
 
 ---
 
-## ⛔ CRITICAL RULE 1: INTERACTIVE ALIGNMENT FIRST
+## ⛔ CRITICAL RULE 1: INTERACTIVE ALIGNMENT FIRST (UNIVERSAL DEMO PROTOCOL)
 
-**NEVER start executing shell commands, creating resources, or deploying workloads immediately after receiving a vague or initial user request.**
+**NEVER start executing shell commands, creating resources, or deploying workloads immediately after receiving a request.**
 
-Your **VERY FIRST ACTION** must be to conduct an interactive requirement alignment interview with the user. Use the `ask_question` tool or structured interactive prompts to confirm every key aspect of the benchmark run.
+Your **VERY FIRST ACTION** for any demo or benchmark request must be to conduct an interactive alignment interview with the user. Use structured prompts or `ask_question` to confirm every key aspect of the workload and target options.
 
 ---
 
@@ -32,74 +32,74 @@ Before conducting the interview or generating recommendations, read [references/
 
 ---
 
-## 📋 Interactive Interview Questionnaire
+## 📋 Interactive Interview Questionnaire (Universal for All Workloads)
 
-Ask the user to clarify or confirm the following choices:
+Ask the user to clarify or confirm choices across the following dimensions:
 
-1. **Benchmark Workload & Model**:
-   - PyTorch DDP (`hf-pytorch-lightning-cpu` simulating Llama 3.1 8B)
-   - TensorStore (`tensorstore-gcsfuse` multi-dimensional array I/O)
+### 1. Benchmark Workload & Model:
+- **MaxText Parquet / ArrayRecord Dataset Loader** (`maxtext-parquet-loader` simulating MaxText JAX LLM training input pipelines)
+- **Multi-Format ML Dataset Loader** (`multi-format-dataset-loader` testing HF `datasets`, `webdataset`, `tensorstore`, `torch.DataLoader`)
+- **PyTorch DDP Checkpointing** (`hf-pytorch-lightning-cpu` simulating Llama 3.1 8B)
+- **TensorStore Multi-dimensional I/O** (`tensorstore-gcsfuse`)
 
-2. **Storage Backends to Evaluate**:
-   - Select one or multiple backends to compare sequentially:
-     - `lustre`: Google Cloud Managed Lustre
-     - `gcsfuse`: GCSFuse Streaming Writes
-     - `gcsfs`: Direct GCS REST API
-     - `all`: Compare all 3 storage backends sequentially
+### 2. Dataset Formats & Preprocessing (For MaxText & Dataset Loaders):
+- **Input Format**: `Parquet`, `ArrayRecord`, `WebDataset TAR`, `Zarr / TensorStore`, `PyTorch .pt`, `JSONL`
+- **Target Comparison Format**: Test direct format vs pre-tokenized `ArrayRecord`
+- **Optional Preprocessing / Conversion**: Ask if user wants to run `parquet_to_arrayrecord.py` to pre-tokenize raw Parquet shards into ArrayRecord before training.
 
-3. **Repeat Iterations**:
-   - Number of repeat runs per storage backend (e.g., 1, 3, or 5 iterations) to compute mean, min, max, and standard deviation.
+### 3. Shuffle Strategies (For MaxText / Data Loaders):
+- `none`: Baseline natural order streaming
+- `two_stage` (Recommended): Shard order shuffle + Batch buffer sliding window
+- `global`: True random point-read indexing
+- `all`: Comparative benchmark across all 3 shuffle modes
 
-4. **Resource Provisioning Strategy**:
-   - **Reuse Existing Resources**: Use currently connected GKE cluster, Lustre PVC, and GCS bucket.
-   - **Provision New Resources**: Create a new GKE cluster, GCS bucket, or Managed Lustre instance from scratch.
+### 4. Storage Backends / Access Modes to Evaluate:
+- `native_gcs` / `gcsfs`: Direct GCS REST/gRPC Range Requests
+- `gcsfuse`: GCSFuse Sidecar Mount with range-read caching
+- `lustre`: Google Cloud Managed Lustre
+- `all`: Compare all storage backends sequentially
 
-5. **Dataset Path / Storage Location (MANDATORY CONFIRMATION)**:
-   - Explicitly confirm the training dataset path URI or mount location:
-     - For GCS/`gcsfs`: `gs://<BUCKET_NAME>/dataset` (or custom GCS Parquet path)
-     - For GCSFuse: `/gcs/dataset` (or custom mounted GCS path)
-     - For Managed Lustre: `/lustre/dataset` (or custom PVC dataset directory)
+### 5. Repeat Iterations & Scale:
+- Number of repeat runs per configuration (e.g. 1, 3, or 5 iterations)
+- `batch_size` (default: 64) and `max_batches` (default: 100)
 
-6. **Benchmark Execution Parameters**:
-   - **GKE Node Pool & Machine Type** (e.g. `n4-standard-80`, `c4-standard-192`)
-   - **Nodes & Ranks**: Number of compute nodes (default: 1) and ranks per node (default: 2)
-   - **Training Steps & Checkpoint Interval**: Total training steps (e.g. 10 or 100) and how often to save checkpoints (e.g. every 5 or 25 steps)
+### 6. Target Cluster & Resource Strategy:
+- **Reuse Existing Resources**: Connected GKE cluster, GCS bucket, and Lustre PVC.
+- **Provision New Resources**: Create a new GKE cluster, GCS bucket, or Lustre instance.
 
 ---
 
 ## 🛑 MANDATORY STEP: FINAL PLAN REVIEW & USER APPROVAL
 
-After collecting the user's responses from the Questionnaire and **BEFORE** invoking any sub-skills:
+After collecting the user's responses from the Questionnaire and **BEFORE** invoking any sub-skills or executing shell commands:
 
-1. **Construct a Structured Benchmark Execution Matrix Plan**:
+1. **Construct a Structured Benchmark Execution Plan**:
    Present a clear Markdown summary table detailing the test matrix, execution sequence, dataset path, total runs, and resource consumption:
 
    ### 📝 Comparative Benchmark Matrix Execution Plan Review
    | Parameter / Dimension | Target Configuration |
    | :--- | :--- |
-   | **Workload & Model** | PyTorch DDP (Llama 3.1 8B) |
-   | **Storage Backends to Compare** | `lustre` vs `gcsfuse` (2 Backends) |
-   | **Dataset Path / Location** | `gs://chongliu-macrobench-dataset-f038a966` / `/lustre/dataset` |
-   | **Repeat Iterations** | 3 Runs per Backend (**Total: 6 Benchmark Executions**) |
+   | **Workload & Model** | MaxText Dataset Loader (`maxtext-parquet-loader`) |
+   | **Input Dataset & Path** | `gs://chongliu-macrobench-dataset-965f0fed` (Parquet) |
+   | **Target Test Formats** | `Parquet` & `ArrayRecord` (Side-by-Side Comparison) |
+   | **Optional Preprocessing** | Run `parquet_to_arrayrecord.py` conversion first |
+   | **Shuffle Strategies** | `two_stage`, `global` |
    | **Target GKE Cluster** | `chongliu-gke-persistent` (Zone: `us-central1-b`) [PERSISTENT - PROTECTED] |
-   | **Node Pool & Nodes** | `n4-standard-80` (1 Node, 2 Ranks per Node) |
-   | **Storage PVC / Bucket** | `lustre-checkpoint-pvc` / `chongliu-macrobench-dataset-f038a966` [PERSISTENT - PROTECTED] |
-   | **Training Steps / Interval** | 10 Steps (Checkpoint every 5 steps) |
+   | **Workload Parameters** | `batch_size=64`, `max_batches=100` |
 
-   ### 💰 Cloud Resource Consumption & Quota Budget Summary
+   ### 💰 Cloud Resource Consumption Summary
    | Resource Type | Allocated Quantity & Spec | Quota & Cost Impact |
    | :--- | :--- | :--- |
-   | **Compute Nodes** | 1 Node (`n4-standard-80`) | Reuses existing cluster (0 new nodes) |
-   | **Accelerator Quota** | None (CPU Simulation Mode) | 0 GPU quota consumed |
-   | **Storage Allocation**| Managed Lustre PVC / GCS Bucket | Reuses existing bucket & PVC |
-   | **Estimated PoC Runtime** | ~5 - 8 Minutes total | Minimal compute cost / zero quota risk |
+   | **Compute Nodes** | Reuses existing GKE cluster nodes | 0 new nodes / 0 GPU quota |
+   | **Storage Allocation**| Reuses existing GCS Bucket | Minimal ephemeral staging |
+   | **Estimated Runtime** | ~3 - 5 Minutes total | Zero quota risk |
 
 2. **Explicit User Approval Prompt**:
    Ask the user explicitly:
-   > *"Please review the benchmark execution plan above. Do you approve proceeding with this run? (Proceed / Modify Plan)"*
+   > *"Please review the proposed execution plan above. Do you approve proceeding with this run? (Reply 'Proceed' / '确认' to begin execution)"*
 
 3. **Strict Gatekeeping**:
-   - **DO NOT** invoke `gcp-resource-provisioner` or `helm-workload-runner` until the user explicitly confirms with "Proceed", "Yes", or approves the plan.
+   - **DO NOT** invoke sub-skills (`gcp-resource-provisioner`, `maxtext-dataset-benchmark`, `helm-workload-runner`) until the user explicitly approves the plan.
 
 ---
 
@@ -110,26 +110,12 @@ Once the user approves the execution plan:
 ```mermaid
 graph TD
     A[User Approves Benchmark Plan] --> B[gcp-resource-provisioner: Validate Resources & Protect Persistent Assets]
-    B --> C{For Each Storage Backend B}
-    C --> D{For Iteration 1..N}
-    D --> E[helm-workload-runner: Deploy Release B-iter-N & Monitor]
-    E --> F[benchmark-metrics-parser: Extract Metrics for Run B-iter-N]
-    F --> G[helm-workload-runner: Teardown Helm Release B-iter-N ONLY]
+    B --> C{For Each Format F / Backend B}
+    C --> D{For Each Shuffle Strategy S}
+    D --> E[helm-workload-runner / maxtext-dataset-benchmark: Deploy Release & Monitor]
+    E --> F[benchmark-metrics-parser: Extract Metrics for Run F-B-S]
+    F --> G[helm-workload-runner: Teardown Ephemeral Helm Release]
     G --> D
-    D -->|Iterations Complete| C
-    C -->|All Backends Complete| H[benchmark-metrics-parser: Generate Comparative Aggregated Matrix Report]
+    D -->|Shuffle Modes Complete| C
+    C -->|All Formats/Backends Complete| H[benchmark-metrics-parser: Generate Comparative Aggregated Matrix Report]
 ```
-
-1. **Phase 1: Environment & Resource Readiness**
-   - Delegate to `gcp-resource-provisioner` once to verify cluster, PVC, bucket, and dataset path.
-
-2. **Phase 2: Matrix Loop Execution**
-   - For each target backend $B \in \{\text{Lustre}, \text{GCSFuse}, \text{gcsfs}\}$:
-     - For iteration $i = 1 \dots N$:
-       1. Delegate to `helm-workload-runner` to install release `pytorch-$B-iter-$i` with confirmed `${DATASET_PATH}`.
-       2. Monitor execution milestones in background; notify user when run $i/N$ starts/finishes.
-       3. Delegate to `benchmark-metrics-parser` to collect raw metrics for run $i$.
-       4. Delegate to `helm-workload-runner` to uninstall release `pytorch-$B-iter-$i` (JobSet/Pod workload only).
-
-3. **Phase 3: Comparative Aggregation Report**
-   - Delegate to `benchmark-metrics-parser` to aggregate all iteration results (calculate Mean, Min, Max, Standard Deviation, and Speedup factor vs baseline).
