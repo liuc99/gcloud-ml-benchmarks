@@ -253,7 +253,14 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
     total_samples = 0
     total_feature_bytes = 0
 
-    columns_list = [c.strip() for c in columns_to_read.split(",") if c.strip()]
+    if columns_to_read.strip().lower() in ("auto", "all", ""):
+        # Auto-detect column names from first parquet file schema
+        first_handle = fs_wrapper.open_input_file(rank_files[0])
+        first_pq = pq.ParquetFile(first_handle)
+        columns_list = first_pq.schema.names
+        logging.info(f"[MAXTEXT] Auto-detected dataset schema columns: {columns_list}")
+    else:
+        columns_list = [c.strip() for c in columns_to_read.split(",") if c.strip()]
 
     # Iterate Parquet files and read targeted column row groups
     for fpath, meta in parquet_metadatas:
