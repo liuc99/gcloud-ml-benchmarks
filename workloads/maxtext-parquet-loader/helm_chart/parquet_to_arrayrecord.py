@@ -160,8 +160,13 @@ def convert_parquet_to_arrayrecord(input_path, output_path, text_column="text", 
         writer.close()
 
         if is_native_gcs and out_gcs_file:
-            with open(local_tmp_path, "rb") as lf, fs.open_output_stream(out_gcs_file) as gf:
-                gf.write(lf.read())
+            from google.cloud import storage
+            gcs_path_no_prefix = out_gcs_file[5:]
+            bucket_name, blob_name = gcs_path_no_prefix.split("/", 1)
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            blob.upload_from_filename(local_tmp_path)
             os.remove(local_tmp_path)
 
         shard_duration = time.perf_counter() - shard_start
