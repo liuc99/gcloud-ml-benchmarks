@@ -130,7 +130,7 @@ def convert_parquet_to_arrayrecord(input_path, output_path, text_column="text", 
             out_file = os.path.join(clean_output, f"shard-{idx:05d}-of-{len(parquet_files):05d}.array_record")
 
         parquet_file = pq.ParquetFile(fpath, filesystem=fs if is_native_gcs else None)
-        writer = array_record_module.ArrayRecordWriter(out_file, options="options: { group_size: 1 }")
+        writer = array_record_module.ArrayRecordWriter(out_file, options="group_size:1")
 
         shard_records = 0
         for rg_idx in range(parquet_file.num_row_groups):
