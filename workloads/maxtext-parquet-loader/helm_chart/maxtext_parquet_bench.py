@@ -241,25 +241,16 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
 
     parquet_metadatas = []
     for fpath in rank_files:
-        file_handle = fs_wrapper.open_input_file(fpath)
-        meta = pq.read_metadata(file_handle)
+        meta = pq.read_metadata(fpath, filesystem=fs_wrapper.fs)
         parquet_metadatas.append((fpath, meta))
         total_rows += meta.num_rows
-        total_file_size_bytes += file_handle.size()
 
     footer_duration = time.perf_counter() - footer_start
-    footer_read_count = fs_wrapper.range_read_calls
-    footer_bytes_read = fs_wrapper.total_bytes_read
 
     logging.info(
         f"[MAXTEXT] ✅ Footer Parse Complete: {len(rank_files)} files parsed in {footer_duration * 1000:.2f} ms "
-        f"({footer_read_count} GCS Range Requests, {footer_bytes_read / 1024:.2f} KB transferred)"
+        f"(Total dataset rows discovered: {total_rows})"
     )
-
-    # Reset metrics counter for row data reads
-    fs_wrapper.range_read_calls = 0
-    fs_wrapper.total_bytes_read = 0
-    fs_wrapper.range_read_durations = []
 
     # Step 2: MaxText Column Projection Range Read Benchmark
     logging.info(
@@ -276,8 +267,7 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
 
     if columns_to_read.strip().lower() in ("auto", "all", ""):
         # Auto-detect column names from first parquet file schema
-        first_handle = fs_wrapper.open_input_file(rank_files[0])
-        first_pq = pq.ParquetFile(first_handle)
+        first_pq = pq.ParquetFile(rank_files[0], filesystem=fs_wrapper.fs)
         columns_list = first_pq.schema.names
         logging.info(f"[MAXTEXT] Auto-detected dataset schema columns: {columns_list}")
     else:
@@ -288,15 +278,16 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
         if loaded_batches >= max_batches:
             break
 
-        file_handle = fs_wrapper.open_input_file(fpath)
-        parquet_file = pq.ParquetFile(file_handle)
+        parquet_file = pq.ParquetFile(fpath, filesystem=fs_wrapper.fs)
 
         for rg_idx in range(parquet_file.num_row_groups):
             if loaded_batches >= max_batches:
                 break
 
+            rg_start = time.perf_counter()
             # Read only selected columns via GCS Range Reads
             table = parquet_file.read_row_group(rg_idx, columns=columns_list, use_threads=True)
+            rg_duration = time.perf_counter() - rg_start
             
             # Simulate MaxText JAX tensor batch creation
             batch_dict = {col: table[col].to_numpy() for col in table.column_names}
