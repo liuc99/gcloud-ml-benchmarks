@@ -131,8 +131,23 @@ class MetricFileSystemWrapper:
                 sz = outer.file_obj.tell()
                 return sz
 
+            @property
+            def closed(outer):
+                return getattr(outer.file_obj, "closed", False)
+
+            def readable(outer):
+                return True
+
+            def seekable(outer):
+                return True
+
+            @property
+            def mode(outer):
+                return "rb"
+
             def close(outer):
-                return outer.file_obj.close()
+                if hasattr(outer.file_obj, "close"):
+                    return outer.file_obj.close()
 
             def __enter__(outer):
                 return outer
