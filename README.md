@@ -14,7 +14,7 @@ This open-source suite empowers GCP ML developers, data engineers, and AI Agent 
 
 ### 🚀 Workload Harnesses:
 - **MaxText Parquet GCS Range Reads (`maxtext-parquet-loader`)**: MaxText JAX LLM training input pipeline benchmark evaluating Parquet column projection and GCS Range Reads over **Native GCS Client (`gs://...`)** and **GCSFuse Sidecar (`/gcs/...`)**.
-- **Dataset Loading (`dataset-loading`)**: Standalone and multi-node dataset streaming benchmark evaluating Parquet, WebDataset TAR, Zarr/TensorStore, PyTorch `.pt`, and JSONL ingestion throughput, TTFB, and latency percentiles.
+- **Multi-Format Dataset Loading (`multi-format-dataset-loader`)**: Standalone and multi-node dataset streaming benchmark evaluating Parquet, WebDataset TAR, Zarr/TensorStore, PyTorch `.pt`, and JSONL ingestion throughput, TTFB, and latency percentiles.
 - **PyTorch DDP (`hf-pytorch-lightning-cpu`)**: Simulates Llama 3.1 8B multi-node distributed training, dataset streaming, and 45 GB model state dict checkpointing.
 - **TensorStore / Zarr (`tensorstore-gcsfuse`)**: Multi-node array read/write benchmark evaluating chunking, concurrency, network MTU tuning, and gRPC streaming.
 - *(Extensible)* Architecture designed for easily plugging in future ML frameworks (e.g. JAX, MaxText, Ray, vLLM).
@@ -50,7 +50,7 @@ gcloud-ml-benchmarks/
 ├── workloads/                   # Benchmark workload definitions & Helm charts
 │   ├── maxtext-parquet-loader/  # MaxText Parquet GCS Range Read benchmark & demo
 │   │   └── helm_chart/
-│   ├── dataset-loading/         # ML dataset streaming & ingestion benchmark harness
+│   ├── multi-format-dataset-loader/ # Multi-format dataset streaming benchmark harness
 │   │   └── helm_chart/          # Synthetic dataset generator & loading benchmark
 │   ├── tensorstore-gcsfuse/     # TensorStore multi-node array I/O harness
 │   │   └── helm_chart/
@@ -61,7 +61,7 @@ gcloud-ml-benchmarks/
     ├── maxtext/                 # MaxText Parquet GCS Range Read suite
     │   ├── README.md            # Workload overview & range read architecture
     │   └── parquet_range_reads_guide.md # Manual reproduction guide (Native GCS & GCSFuse)
-    ├── dataset_loading/         # ML dataset loading benchmark suite
+    ├── multi_format_dataset/    # Multi-format dataset loading benchmark suite
     │   ├── README.md            # Workload overview & format matrix
     │   └── step_by_step_guide.md# Manual reproduction guide
     ├── tensorstore/             # TensorStore + GCSFuse benchmark suite
@@ -80,9 +80,9 @@ gcloud-ml-benchmarks/
   * [**MaxText Documentation Index**](docs/maxtext/README.md)
   * [**Parquet Range Reads Guide (Native GCS vs GCSFuse)**](docs/maxtext/parquet_range_reads_guide.md)
 
-* 📥 **Dataset Loading Benchmarks**:
-  * [**Dataset Loading Documentation Index**](docs/dataset_loading/README.md)
-  * [**Step-by-Step Reproduction Guide**](docs/dataset_loading/step_by_step_guide.md)
+* 📥 **Multi-Format Dataset Loading Benchmarks**:
+  * [**Multi-Format Dataset Documentation Index**](docs/multi_format_dataset/README.md)
+  * [**Step-by-Step Reproduction Guide**](docs/multi_format_dataset/step_by_step_guide.md)
 
 * 📦 **TensorStore Benchmarks**:
   * [**TensorStore Documentation Index**](docs/tensorstore/README.md)

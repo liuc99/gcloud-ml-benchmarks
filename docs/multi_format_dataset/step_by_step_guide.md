@@ -66,7 +66,7 @@ You can run the synthetic dataset generator container on GKE (or locally) to gen
 
 ```bash
 # Option A: Generate directly over gs:// using gcsfs
-python3 workloads/dataset-loading/helm_chart/dataset_generator.py \
+python3 workloads/multi-format-dataset-loader/helm_chart/dataset_generator.py \
   --output-path="gs://${BUCKET_NAME}/bench_dataset_parquet" \
   --format=parquet \
   --total-size-mb=10240 \
@@ -77,10 +77,10 @@ python3 workloads/dataset-loading/helm_chart/dataset_generator.py \
 
 ## 🚀 Step 4: Deploy Dataset Loading Benchmarks via Helm
 
-Navigate to the dataset-loading Helm chart directory:
+Navigate to the multi-format-dataset-loader Helm chart directory:
 
 ```bash
-cd workloads/dataset-loading/helm_chart
+cd workloads/multi-format-dataset-loader/helm_chart
 ```
 
 ### Scenario 1: GCSFuse Streaming Reads (CSI Sidecar Mount)

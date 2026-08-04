@@ -47,14 +47,14 @@ Generate a sample 1 GB Parquet dataset locally and run the benchmark:
 
 ```bash
 # 1. Generate 1 GB Parquet dataset (10 shards)
-python3 workloads/dataset-loading/helm_chart/dataset_generator.py \
+python3 workloads/multi-format-dataset-loader/helm_chart/dataset_generator.py \
   --output-path=/tmp/demo_dataset \
   --format=parquet \
   --total-size-mb=1024 \
   --num-files=10
 
 # 2. Run Dataset Loading Benchmark
-python3 workloads/dataset-loading/helm_chart/dataset_loading_bench.py \
+python3 workloads/multi-format-dataset-loader/helm_chart/dataset_loading_bench.py \
   --dataset-path=/tmp/demo_dataset \
   --format=parquet \
   --reader=hf_datasets \
