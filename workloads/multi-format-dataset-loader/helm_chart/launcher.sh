@@ -16,6 +16,11 @@ if [ -z "${DATASET_PATH}" ]; then
   exit 1
 fi
 
+if [ -f "/workload/requirements.txt" ]; then
+  echo "--> Installing requirements from /workload/requirements.txt..."
+  pip3 install --no-cache-dir -r /workload/requirements.txt
+fi
+
 # Optional: Generate synthetic dataset if requested or directory is missing
 if [ "${GENERATE_DATASET}" = "true" ]; then
   echo "--> Generating synthetic ${FORMAT} dataset at ${DATASET_PATH}..."

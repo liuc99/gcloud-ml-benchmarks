@@ -15,6 +15,11 @@ if [ -z "${DATASET_PATH}" ]; then
   exit 1
 fi
 
+if [ -f "/workload/requirements.txt" ]; then
+  echo "--> Installing requirements from /workload/requirements.txt..."
+  pip3 install --no-cache-dir -r /workload/requirements.txt
+fi
+
 if [ "${GENERATE_DATASET}" = "true" ]; then
   echo "--> Generating synthetic MaxText Parquet dataset at ${DATASET_PATH}..."
   python3 /workload/dataset_generator.py \
