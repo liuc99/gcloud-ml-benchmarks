@@ -354,7 +354,12 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
                 if loaded_batches % 20 == 0:
                     logging.info(f"  [MaxText Batch {loaded_batches}/{max_batches}] Read {num_samples} samples ({batch_bytes / (1024 * 1024):.2f} MB)")
     else:
-        # ArrayRecord Reader logic
+        import random
+        if shuffle_mode in ["two_stage", "global"]:
+            random.shuffle(rank_files)
+
+        shuffle_buffer = []
+
         for fpath in rank_files:
             if loaded_batches >= max_batches:
                 break
@@ -373,7 +378,11 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
             num_recs = reader.num_records()
             current_batch = []
             
-            for idx in range(num_recs):
+            indices = list(range(num_recs))
+            if shuffle_mode == "global":
+                random.shuffle(indices)
+
+            for idx in indices:
                 if loaded_batches >= max_batches:
                     break
 
@@ -385,18 +394,28 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
                 current_batch.append(tokens)
 
                 if len(current_batch) >= batch_size:
+                    if shuffle_mode == "two_stage":
+                        shuffle_buffer.append((current_batch, b_duration))
+                        current_batch = []
+                        if len(shuffle_buffer) < 4 and loaded_batches + len(shuffle_buffer) < max_batches:
+                            continue
+                        pick_idx = random.randint(0, len(shuffle_buffer) - 1)
+                        batch_to_emit, b_duration = shuffle_buffer.pop(pick_idx)
+                    else:
+                        batch_to_emit = current_batch
+                        current_batch = []
+
                     now = time.perf_counter()
                     if loaded_batches == 0:
                         first_batch_time = (now - bench_start) + upfront_index_duration
                         logging.info(f"[MAXTEXT] Time to First Batch (TTFB): {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
 
-                    num_samples = len(current_batch)
-                    batch_bytes = sum(t.nbytes for t in current_batch)
+                    num_samples = len(batch_to_emit)
+                    batch_bytes = sum(t.nbytes for t in batch_to_emit)
                     total_samples += num_samples
                     total_feature_bytes += batch_bytes
                     loaded_batches += 1
                     batch_durations.append(b_duration)
-                    current_batch = []
 
                     if loaded_batches % 20 == 0:
                         logging.info(f"  [MaxText Batch {loaded_batches}/{max_batches}] Read {num_samples} samples ({batch_bytes / (1024 * 1024):.2f} MB)")
@@ -404,6 +423,23 @@ def run_maxtext_parquet_benchmark(dataset_path, access_mode, columns_to_read, ba
             reader.close()
             if access_mode == "native_gcs" and os.path.exists(local_fpath):
                 os.remove(local_fpath)
+
+        if shuffle_mode == "two_stage" and shuffle_buffer:
+            while shuffle_buffer and loaded_batches < max_batches:
+                pick_idx = random.randint(0, len(shuffle_buffer) - 1)
+                batch_to_emit, b_duration = shuffle_buffer.pop(pick_idx)
+
+                now = time.perf_counter()
+                if loaded_batches == 0:
+                    first_batch_time = (now - bench_start) + upfront_index_duration
+                    logging.info(f"[MAXTEXT] Time to First Batch (TTFB): {first_batch_time * 1000:.2f} ms ({first_batch_time:.4f} s)")
+
+                num_samples = len(batch_to_emit)
+                batch_bytes = sum(t.nbytes for t in batch_to_emit)
+                total_samples += num_samples
+                total_feature_bytes += batch_bytes
+                loaded_batches += 1
+                batch_durations.append(b_duration)
 
     total_duration = (time.perf_counter() - bench_start) + upfront_index_duration
 
