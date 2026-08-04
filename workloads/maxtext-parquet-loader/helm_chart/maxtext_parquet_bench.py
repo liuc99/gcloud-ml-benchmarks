@@ -160,9 +160,15 @@ def setup_filesystem(dataset_path, access_mode):
     logging.info(f"Setting up filesystem for path: '{dataset_path}' in access_mode: '{access_mode}'")
 
     if access_mode == "native_gcs":
-        # Remove gs:// prefix for PyArrow GCSFileSystem
+        # Remove gs:// prefix for PyArrow GcsFileSystem
         clean_path = dataset_path.replace("gs://", "")
-        raw_fs = pafs.GCSFileSystem()
+        if hasattr(pafs, "GcsFileSystem"):
+            raw_fs = pafs.GcsFileSystem()
+        elif hasattr(pafs, "GCSFileSystem"):
+            raw_fs = pafs.GCSFileSystem()
+        else:
+            import gcsfs
+            raw_fs = gcsfs.GCSFileSystem()
         fs_wrapper = MetricFileSystemWrapper(raw_fs, access_mode)
         return fs_wrapper, clean_path, access_mode
     elif access_mode in ("gcsfuse", "posix"):
