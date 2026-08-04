@@ -34,6 +34,7 @@ A dedicated benchmarking and PoC framework within `gcloud-ml-benchmarks` for eva
 | Dataset Format | Recommended Reader Framework | Storage Backend Tested | Typical Use Case |
 | :--- | :--- | :--- | :--- |
 | **Parquet** | HuggingFace `datasets.load_dataset(..., streaming=True)` | GCSFuse, `gcsfs`, Managed Lustre | LLM Pre-training / Text & Token Sequences |
+| **ArrayRecord** | C++ `ArrayRecordReader` / `array-record` | Native GCS, GCSFuse, Staging | Pre-tokenized LLM Token Array Sequences (MaxText / JAX) |
 | **WebDataset TAR** | `webdataset.WebLoader` | GCSFuse, Managed Lustre | Vision, Audio & Multimodal Datasets |
 | **Zarr / TensorStore** | `tensorstore.open(...)` | GCS Native KVStore, GCSFuse, Lustre | Multimodal Tensors, Medical Imaging, Climate Models |
 | **PyTorch `.pt`** | PyTorch `DataLoader` + `gcsfs` / POSIX | GCSFuse, `gcsfs`, Managed Lustre | Pre-processed Tensor Shards |

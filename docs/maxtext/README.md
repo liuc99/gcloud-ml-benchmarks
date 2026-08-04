@@ -1,41 +1,45 @@
-# MaxText Parquet Dataset Ingestion & GCS Range Read Benchmark
+# MaxText Dataset Ingestion & GCS Range Read / ArrayRecord Benchmark
 
-A dedicated workload and demo suite within `gcloud-ml-benchmarks` simulating the **MaxText JAX LLM Training Input Pipeline** reading multi-column Parquet datasets via **GCS Range Reads**.
+A dedicated workload and demo suite within `gcloud-ml-benchmarks` simulating the **MaxText JAX LLM Training Input Pipeline** reading multi-column Parquet datasets via **GCS Range Reads** and pre-tokenized **ArrayRecord** format.
 
 ---
 
-## 🎯 Architecture Overview
+## 🎯 Architecture & Format Overview
 
-In large-scale LLM training with MaxText (e.g. Llama 3 / Gemma pre-training), datasets are stored in Parquet format containing multiple columns (such as `input_ids`, `attention_mask`, `labels`, and optional `metadata_bytes`).
+In large-scale LLM training with MaxText (e.g. Llama 3 / Gemma pre-training), datasets are typically ingested in one of two primary formats:
 
-Instead of downloading entire multi-gigabyte Parquet files, MaxText input pipelines use **GCS Range Reads** (`Range: bytes=start-end`) to:
-1. **Fetch Parquet Footer Metadata**: Read the final 64 KB – 1 MB footer to parse row group offsets and column chunk boundaries.
-2. **Project Target Columns**: Issue targeted Range Requests to download *only* the specific token columns (`input_ids`, `labels`) required for model steps, bypassing unneeded columns and saving 50%+ network bandwidth and memory.
+### 1. Parquet Format (On-the-fly Tokenization + GCS Range Reads)
+- **GCS Range Reads**: MaxText input pipelines use GCS Range Requests (`Range: bytes=start-end`) to fetch Parquet footers and project target columns (`input_ids`, `label`), bypassing unneeded metadata and saving 50%+ network bandwidth.
+- **Flexibility**: Enables instant training start and on-the-fly tokenization/data augmentation without pre-processing delays.
+
+### 2. ArrayRecord Format (Pre-tokenized Zero-CPU Streaming)
+- **Pre-tokenized Int32 Arrays**: Raw text in Parquet is pre-processed into `.array_record` shards holding pre-tokenized `int32` token arrays via the included [`parquet_to_arrayrecord.py`](../../workloads/maxtext-parquet-loader/helm_chart/parquet_to_arrayrecord.py) converter.
+- **Zero-CPU Overhead**: Eliminates runtime tokenizer latency and CPU decoding bottlenecks during training steps.
+- **Sub-millisecond Random Access**: ArrayRecord footer index tables enable $O(1)$ random sample indexing with sub-millisecond batch latencies (~0.33 ms/batch).
+
+---
+
+## 📊 Benchmark Comparison: Parquet vs. ArrayRecord & Shuffle Modes
+
+| Format & Strategy | Time to First Batch (TTFB) | Upfront Index Scanning Penalty | Batch Latency (p50 / p95) | Main Characteristic / Advantage |
+| :--- | :--- | :--- | :--- | :--- |
+| **Parquet (`none` / `two_stage`)** | **~372 ms** | 0 ms | ~1.5 ms / 4.2 ms | Instant start; zero pre-processing waiting time. |
+| **Parquet (`global` shuffle)** | 91.64 s | **91.47 s** | ~0.01 ms | ⚠️ High upfront index scanning penalty over 1600+ Parquet footers. |
+| **ArrayRecord (`none` / `two_stage`)**| ~4.7 s – 7.0 s | 0 ms | **0.34 ms / 0.57 ms** | Sub-millisecond batch latency, zero runtime CPU tokenization. |
+| **ArrayRecord (`global` shuffle)** | ~6.5 s | **31.56 ms** | **0.33 ms / 0.48 ms** | **🚀 2900x faster index loading** than Parquet global shuffle with true randomness. |
 
 ---
 
 ## 🔌 Dual Access Modes Supported
 
-This harness supports both primary GCS dataset access methods on GCP / GKE:
-
-| Access Mode | URI Path Format | Driver / Interface | Range Read Mechanism | Recommended Range Read Options |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. Native GCS Client** | `gs://my-bucket/parquet` | `pyarrow.fs.GCSFileSystem` / `gcsfs` / `google-cloud-storage` | Direct HTTP GET Range Requests (`Range: bytes=X-Y`) or gRPC Byte Ranges | Default native GCS connection pool |
-| **2. GCSFuse Sidecar Mount** | `/gcs/my-bucket/parquet` | GCSFuse CSI Driver (`GcsFuseCsiDriver`) POSIX `lseek` + `read` | FUSE kernel layer translates POSIX seeks into GCS Range Requests | `file-cache:cache-file-for-range-read:true`, `file-cache:max-size-mb:-1` |
+| Access Mode | URI Path Format | Driver / Interface | Range Read / Streaming Mechanism |
+| :--- | :--- | :--- | :--- |
+| **1. Native GCS Client** | `gs://my-bucket/dataset` | `pyarrow.fs.GCSFileSystem` / `gcsfs` / `google-cloud-storage` | Direct HTTP GET Range Requests (`Range: bytes=X-Y`) or gRPC stream |
+| **2. GCSFuse Sidecar Mount** | `/gcs/my-bucket/dataset` | GCSFuse CSI Driver (`GcsFuseCsiDriver`) POSIX `lseek` + `read` | FUSE kernel layer translates POSIX seeks into GCS Range Requests |
 
 ---
 
-## 📊 Core Performance & Range Read Metrics Collected
+## 📖 Step-by-Step Guide & Demos
 
-- ⏱️ **Time to First Batch (TTFB)**: Delay from script start to first batch ready for JAX step (ms).
-- 📑 **Parquet Footer Parse Latency**: Time to retrieve and parse metadata via tail range read (ms).
-- 🎯 **Range Read Efficiency (%)**: Useful feature payload bytes vs total bytes downloaded from GCS.
-- ⚡ **GCS Range Request Latency**: Average and p95 latency per range read request (ms).
-- 🚀 **Ingestion Throughput**: Total read speed (MB/s and Gbps).
-
----
-
-## 📖 Step-by-Step Guide
-
-For step-by-step execution instructions on GKE (or locally), refer to:
-👉 [MaxText Parquet GCS Range Read Guide](./parquet_range_reads_guide.md)
+For step-by-step instructions on running benchmarks and conversion scripts on GKE (or locally), refer to:
+👉 [MaxText Parquet & ArrayRecord Benchmark Guide](./parquet_range_reads_guide.md)
