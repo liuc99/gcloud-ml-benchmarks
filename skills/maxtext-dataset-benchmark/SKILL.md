@@ -1,6 +1,6 @@
 ---
 name: maxtext-dataset-benchmark
-description: Skill for running MaxText dataset loading demos with flexible format selection (Parquet or ArrayRecord), optional Parquet-to-ArrayRecord preprocessing, and shuffle strategy benchmarking (none, two_stage, global) on GKE.
+description: Skill for running MaxText dataset loading demos with flexible format selection (Parquet or ArrayRecord), optional Parquet-to-ArrayRecord preprocessing, interactive user configuration inquiry, plan approval, and shuffle strategy benchmarking on GKE.
 ---
 
 # MaxText Dataset Benchmark & Conversion Skill (`maxtext-dataset-benchmark`)
@@ -8,6 +8,55 @@ description: Skill for running MaxText dataset loading demos with flexible forma
 This skill enables an AI Agent to execute MaxText dataset loading demos on GKE using **either Parquet or ArrayRecord** formats and compare **different shuffle strategies (`none`, `two_stage`, `global`)**. 
 
 If a user provides a Parquet dataset and wants to test or evaluate ArrayRecord, an optional conversion tool (`parquet_to_arrayrecord.py`) is provided to pre-tokenize and convert Parquet shards into ArrayRecord before running the benchmark.
+
+---
+
+## 📋 Mandatory User Interaction & Plan Approval Protocol
+
+To ensure user transparency and safety, **the AI Agent MUST strictly follow this 2-step interaction flow** before executing any commands or deploying workloads on GKE:
+
+### Step 1: Pre-execution Configuration Inquiry
+Before constructing Helm parameters or starting dataset conversion, confirm the following configuration details with the user:
+
+1. **Dataset Location & Input Format**:
+   - GCS Dataset Path (e.g. `gs://my-bucket/dataset`).
+   - Current file format (`Parquet` or `ArrayRecord`).
+2. **Target Format Choice**:
+   - Run benchmark as **Parquet** (GCS Range Reads + live tokenization).
+   - Run benchmark as **ArrayRecord** (Pre-tokenized zero-CPU streaming).
+   - Run **Side-by-Side Comparison** (Compare both Parquet and ArrayRecord).
+3. **Optional Preprocessing / Conversion**:
+   - If input is Parquet and target includes ArrayRecord: Confirm whether to run `parquet_to_arrayrecord.py` to convert shards first.
+4. **Shuffle Strategies to Test**:
+   - Select shuffle modes: `none`, `two_stage` (recommended for production), `global` (true random), or `all`.
+5. **Workload Scale**:
+   - `batch_size` (default: 64), `max_batches` (default: 100).
+
+---
+
+### Step 2: Presentation of Execution Plan & User Approval
+Present a complete Markdown Execution Plan summarizing the steps to be performed. **Do NOT run any terminal command or Helm installation until the user explicitly approves the plan.**
+
+#### Template for Execution Plan Presentation:
+
+> ### 📝 Proposed MaxText Benchmark Execution Plan
+> 
+> **1. Configuration Summary:**
+> - **Input Dataset Path**: `gs://my-bucket/dataset`
+> - **Input Dataset Format**: `Parquet`
+> - **Target Test Formats**: `Parquet` & `ArrayRecord` (Side-by-Side Comparison)
+> - **Shuffle Strategies**: `two_stage`, `global`
+> - **Workload Parameters**: `batch_size=64`, `max_batches=100`
+> 
+> **2. Planned Action Steps:**
+> - [ ] **Step 1**: Pre-process Parquet shards into ArrayRecord format (`gs://my-bucket/dataset_arrayrecord`) via `parquet_to_arrayrecord.py`.
+> - [ ] **Step 2**: Deploy Helm release `maxtext-demo-run` on GKE for **Parquet + two_stage** shuffle benchmark.
+> - [ ] **Step 3**: Deploy Helm release `maxtext-demo-run` on GKE for **ArrayRecord + two_stage** shuffle benchmark.
+> - [ ] **Step 4**: Deploy Helm release `maxtext-demo-run` on GKE for **ArrayRecord + global** shuffle benchmark.
+> - [ ] **Step 5**: Collect and display comparative TTFB, Upfront Index Penalty, Throughput, and Latency Percentiles table.
+> - [ ] **Step 6**: Uninstall Helm release and clean up cluster compute resources.
+> 
+> **Please review the plan. Reply "Proceed" / "确认" to begin execution.**
 
 ---
 
