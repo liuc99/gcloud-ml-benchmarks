@@ -18,9 +18,10 @@ This sub-skill handles environment discovery, cluster credentials authentication
 
 **Rule**: If a resource existed prior to the benchmark run or was explicitly supplied by the user as a persistent asset, **NEVER delete, modify, or tear down this resource**.
 
-### 2. Ad-hoc Ephemeral Benchmark Resources (CLEAN UP AFTER RUN)
-- **Helm Workload Releases** (JobSet Pods created specifically for the benchmark run).
-- **Temporary Ephemeral GCS Buckets / PVCs** created explicitly by the agent *during* the run as transient test artifacts.
+### 2. Ad-hoc Ephemeral Benchmark Resources (DESTROY IMMEDIATELY AFTER RUN)
+- **Helm Workload Releases**: JobSet Pods created specifically for the benchmark run (`helm uninstall`).
+- **Temporary Ephemeral GKE Test Clusters**: Created when user has no existing cluster (`gcloud container clusters create-auto temp-benchmark-cluster`). **MUST be deleted via `gcloud container clusters delete` immediately after benchmark completion.**
+- **Temporary Ephemeral GCS Buckets / PVCs**: Created explicitly by the agent *during* the run as transient test artifacts.
 
 ---
 
@@ -75,3 +76,14 @@ This sub-skill handles environment discovery, cluster credentials authentication
     --member="principal://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${PROJECT_ID}.svc.id.goog/subject/ns/default/sa/default" \
     --role="roles/storage.objectAdmin"
   ```
+
+---
+
+## 💻 3. Recommended GKE Machine Types & Node Pool Selection Matrix
+
+| Benchmark Workload Scenario | Recommended Machine Type / Spec | Network Egress Bandwidth | Key Provisioning Flags & Rationale |
+| :--- | :--- | :--- | :--- |
+| **Pure I/O & Dataset Ingestion** *(Parquet/ArrayRecord Loading)* | **`n4-standard-80`** or **`c3-standard-88`** | **High Egress (~50 - 100 Gbps)** | `--machine-type=n4-standard-80 --network-performance-configs=total-egress-bandwidth-tier=TIER_1`<br>*High CPU & network throughput without expensive GPU/TPU quota.* |
+| **MaxText JAX LLM Training** *(TPU Acceleration)* | **`ct6e-standard-4t`** *(v6e/Trillium)* or **`ct5p-hightpu-4t`** *(v5p)* | **Optical ICI Mesh + High GCS Bandwidth** | `--node-locations=${ZONE} --machine-type=ct6e-standard-4t`<br>*Ultra-high throughput ICI mesh for distributed JAX training.* |
+| **PyTorch DDP LLM Training** *(GPU Acceleration)* | **`a3-highgpu-8g`** *(H100)* or **`a2-ultragpu-8g`** *(A100)* | **3.2 Tbps GPUDirect RDMA** | `--accelerator=type=nvidia-h100-80gb,count=8`<br>*Massive GPU memory and inter-GPU bandwidth.* |
+| **Cost-Effective Entry Baseline** *(Lightweight Demo)* | **`n2-standard-16`** or **`e2-standard-16`** | Standard Bandwidth (~16 Gbps) | `--machine-type=n2-standard-16`<br>*Low-cost baseline for single-node debugging.* |

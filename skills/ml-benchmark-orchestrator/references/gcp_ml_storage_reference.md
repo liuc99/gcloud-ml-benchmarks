@@ -74,3 +74,33 @@ flowchart TD
     Q2 -->|200 - 800 MB/s| GCSFuse[Recommend GCSFuse with Streaming Writes]
     Q2 -->|< 200 MB/s| GCSFS[GCSFuse or Direct gcsfs]
 ```
+
+---
+
+## 🚀 5. MaxText / JAX Dataset Ingestion & Shuffle Performance Baselines
+
+The following baseline metrics were measured on GKE (`chongliu-gke-persistent`, Zone `us-central1-b`, `n4-standard-80` nodes) evaluating **ArrayRecord** and **Parquet** dataset loading pipelines under `native_gcs` vs `gcsfuse` across 3 Shuffle Modes (`none`, `two_stage`, `global`):
+
+### 📄 Parquet Dataset Ingestion (1,650 Shards, Column Projection `input_ids,label`)
+| Storage & Access Mode | Shuffle Mode | Time to First Batch (TTFB) | Upfront Index Penalty | Sample Ingestion Speed | P95 Batch Latency |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`gcsfuse` (CSI Mount)** | **`two_stage` (Grain)** | **0.74 ms** ⚡ | **0 ms** | **2,748,166 samples/s** 🚀 | **0.04 ms** |
+| **`gcsfuse` (CSI Mount)** | **`none` (Sequential)** | **0.96 ms** ⚡ | **0 ms** | **2,312,559 samples/s** 🚀 | **0.04 ms** |
+| **`gcsfuse` (CSI Mount)** | **`global` (Random)** | **1,951.59 ms** | **1,950.91 ms** | **463,006 samples/s** | **0.01 ms** |
+| **`native_gcs` (gcsfs)** | **`none` (Sequential)** | **123.09 ms** | **0 ms** | **494,736 samples/s** | **0.06 ms** |
+| **`native_gcs` (gcsfs)** | **`two_stage` (Grain)** | **225.23 ms** | **0 ms** | **441,769 samples/s** | **0.07 ms** |
+| **`native_gcs` (gcsfs)** | **`global` (Random)** | **85,305.97 ms (85.3s)** ⚠️ | **85,216.25 ms (85.2s)** 🐢 | **10,492 samples/s** 📉 | **0.07 ms** |
+
+### 📦 ArrayRecord Dataset Ingestion (Binary Records)
+| Storage & Access Mode | Shuffle Mode | Time to First Batch (TTFB) | Read Throughput | Sample Ingestion Speed | P95 Batch Latency |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`gcsfuse` (CSI Mount)** | **`none` (Sequential)** | **120.92 ms** | **12.14 MB/s** 🚀 | **4,716 samples/s** | **0.24 ms** |
+| **`gcsfuse` (CSI Mount)** | **`two_stage` (Grain)** | **139.94 ms** | **10.99 MB/s** 🚀 | **4,242 samples/s** | **0.24 ms** |
+| **`gcsfuse` (CSI Mount)** | **`global` (Random)** | **218.75 ms** | **1.92 MB/s** 📉 | **755 samples/s** | **1.70 ms** ⚠️ |
+| **`native_gcs` (gcsfs)** | **`none` (Sequential)** | **3,138.84 ms** | **3.09 MB/s** | **1,199 samples/s** | **0.24 ms** |
+| **`native_gcs` (gcsfs)** | **`two_stage` (Grain)** | **3,732.31 ms** | **3.43 MB/s** | **1,325 samples/s** | **0.20 ms** |
+| **`native_gcs` (gcsfs)** | **`global` (Random)** | **2,427.28 ms** | **4.23 MB/s** | **1,652 samples/s** | **0.26 ms** |
+
+### 💡 Dataset Pipeline Architectural Rules of Thumb:
+1. **GCSFuse + Grain Two-Stage Shuffle is the Gold Standard**: Delivers sub-millisecond TTFB (< 1 ms), peak ingestion throughput (up to **2.75 Million samples/sec** for Parquet, **~12 MB/s** for ArrayRecord), while maintaining complete training randomness.
+2. **Avoid Global Random Access Shuffle (`global`) on GCS Remote Storage**: Global point-read indexing requires scanning all file footers upfront (incurring an **85+ seconds penalty** over REST API for 1,650 files) and degrades POSIX cache hit rates during training.
