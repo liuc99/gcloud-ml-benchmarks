@@ -1,0 +1,216 @@
+# yamllint disable
+{{- $root := . -}}
+{{ $timestamp := now | date "2006-01-02-15-04-05" }}
+{{ $jobuuid := uuidv4 }}
+{{ $nodes := .Values.workload.nodes }}
+{{/* Default 4 (not 8): a restoring rank's peak RSS ~doubles to ~92GB, so 8/node OOMs the 720GB c4-standard-192. See values_base.yaml. */}}
+{{ $ranksPerNode := default 4 .Values.workload.ranksPerNode }}
+{{ $worldSize := mul .Values.workload.nodes $ranksPerNode }}
+
+apiVersion: jobset.x-k8s.io/v1alpha2
+kind: JobSet
+metadata:
+  name: "{{ .Release.Name }}"
+  namespace: default
+spec:
+  failurePolicy:
+    maxRestarts: 0
+  replicatedJobs:
+  - name: workload
+    replicas: 1
+    template:
+      spec:
+        parallelism: {{ $nodes }}
+        completions: {{ $nodes }}
+        backoffLimit: 0
+        completionMode: Indexed
+        ttlSecondsAfterFinished: 43200
+        template:
+          metadata:
+            name: {{ .Release.Name }}
+            annotations:
+              kubectl.kubernetes.io/default-container: workload
+              {{- if $root.Values.gcsfuse.enabled }}
+              gke-gcsfuse/volumes: "true"
+              {{- if $root.Values.gcsfuse.sidecarImage }}
+              gke-gcsfuse/sidecar-image: {{ $root.Values.gcsfuse.sidecarImage | quote }}
+              {{- end }}
+              {{- end }}
+          spec:
+            serviceAccountName: {{ $root.Values.serviceAccount }}
+            subdomain: "{{ .Release.Name }}"
+            restartPolicy: Never
+            {{- if $root.Values.nodeSelector }}
+            nodeSelector:
+              {{- toYaml $root.Values.nodeSelector | nindent 14 }}
+            {{- end }}
+            {{- if $root.Values.workload.singlePodPerNode }}
+            affinity:
+              podAntiAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      jobset.sigs.k8s.io/jobset-name: "{{ .Release.Name }}"
+            {{- end }}
+            volumes:
+            - name: workload-configuration
+              configMap:
+                name: "{{ .Release.Name }}-config"
+                items:
+                - key: workload-configuration
+                  path: {{ $root.Values.workload.configFile }}
+                - key: requirements.txt
+                  path: requirements.txt
+            - name: workload-launcher
+              configMap:
+                name: "{{ .Release.Name }}-launcher"
+            - name: shared-memory
+              emptyDir:
+                medium: "Memory"
+                sizeLimit: 250Gi
+            {{- if $root.Values.gcsfuse.enabled }}
+            - name: gcsfuse-dataset
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                volumeAttributes:
+                  bucketName: "{{ $root.Values.gcsfuse.datasetBucket }}"
+                  mountOptions: "{{ $root.Values.gcsfuse.mountOptions }}"
+            - name: gcsfuse-checkpoint
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                volumeAttributes:
+                  bucketName: "{{ $root.Values.gcsfuse.checkpointBucket }}"
+                  mountOptions: "{{ $root.Values.gcsfuse.mountOptions }}"
+            {{- end }}
+            {{- if and $root.Values.lustre.enabled $root.Values.lustre.datasetPvc (ne $root.Values.lustre.datasetPvc "none") }}
+            - name: lustre-dataset
+              persistentVolumeClaim:
+                claimName: "{{ $root.Values.lustre.datasetPvc }}"
+            {{- end }}
+            {{- if and $root.Values.lustre.enabled $root.Values.lustre.checkpointPvc (ne $root.Values.lustre.checkpointPvc "none") }}
+            - name: lustre-checkpoint
+              persistentVolumeClaim:
+                claimName: "{{ $root.Values.lustre.checkpointPvc }}"
+            {{- end }}
+            containers:
+            - name: workload
+              image: "{{ $root.Values.workload.image }}"
+              imagePullPolicy: Always
+              env:
+              - name: JOB_TIMESTAMP
+                value: "{{ $timestamp }}"
+              - name: JOB_UUID
+                value: "{{ $jobuuid }}"
+              - name: RUN_ID
+                value: "{{ .Release.Name }}"
+              - name: JOB_COMPLETION_INDEX
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+              - name: MASTER_ADDR
+                value: "{{ .Release.Name }}-workload-0-0.{{ .Release.Name }}.default.svc.cluster.local"
+              - name: MASTER_PORT
+                value: "6002"
+              - name: WORLD_SIZE
+                value: "{{ $worldSize }}"
+              - name: NNODES
+                value: "{{ $nodes }}"
+              - name: GPUS_PER_NODE
+                value: "{{ $ranksPerNode }}"
+              - name: MAX_STEPS
+                value: "{{ $root.Values.workload.steps }}"
+              {{- if $root.Values.workload.hfToken }}
+              - name: HF_TOKEN
+                value: "{{ $root.Values.workload.hfToken }}"
+              {{- end }}
+              - name: DATASET_PATH
+                value: "{{ $root.Values.gcsfs.datasetPath }}"
+              - name: CKPT_WRITE_PATH
+                value: "{{ $root.Values.gcsfs.ckptWritePath }}"
+              - name: CKPT_LOAD_PATH
+                value: "{{ $root.Values.gcsfs.ckptLoadPath }}"
+              {{- if $root.Values.lustre.ckptGcsSource }}
+              - name: CKPT_GCS_SOURCE
+                value: "{{ $root.Values.lustre.ckptGcsSource }}"
+              {{- end }}
+              {{- if $root.Values.lustre.datasetGcsSource }}
+              - name: DATASET_GCS_SOURCE
+                value: "{{ $root.Values.lustre.datasetGcsSource }}"
+              {{- end }}
+              - name: CHECKPOINT_WRITE_INTERVAL
+                value: "{{ $root.Values.workload.ckptWriterInterval }}"
+              - name: CKPT_TO_KEEP
+                value: "{{ $root.Values.workload.ckptToKeep }}"
+              - name: ASYNC_CHECKPOINT
+                value: "{{ $root.Values.workload.asyncCheckpoint }}"
+              - name: ADDITIONAL_CHECKPOINT_PATHS
+                value: "{{ $root.Values.workload.additionalCheckpointPaths }}"
+              - name: USE_TENSORSTORE
+                value: "{{ $root.Values.workload.useTensorstore }}"
+              - name: TS_SINGLE_ARRAY
+                value: "{{ $root.Values.workload.tsSingleArray }}"
+              - name: PARALLEL_COPY_WORKERS
+                value: "{{ $root.Values.workload.parallelCopyWorkers }}"
+              - name: SKIP_RAMDISK_STAGING
+                value: "{{ $root.Values.workload.skipRamdiskStaging }}"
+              - name: TS_DRIVER
+                value: "{{ $root.Values.workload.tsDriver }}"
+              - name: NUM_SHARDS
+                value: "{{ $root.Values.workload.numShards }}"
+              - name: MODEL_ID
+                value: "{{ $root.Values.workload.modelId }}"
+              - name: TRAINING_STRATEGY
+                value: "{{ $root.Values.workload.trainingStrategy }}"
+              - name: SIMULATED_STEP_COMPUTE_SECONDS
+                value: "{{ $root.Values.workload.simulatedStepComputeSeconds }}"
+              - name: PER_DEVICE_TRAIN_BATCH_SIZE
+                value: "{{ $root.Values.workload.perDeviceBatch }}"
+              - name: GRADIENT_ACCUMULATION_STEPS
+                value: "{{ $root.Values.workload.gradAccum }}"
+              - name: DATALOADER_NUM_WORKERS
+                value: "{{ $root.Values.workload.dataloaderWorkers }}"
+              - name: DATALOADER_PREFETCH_FACTOR
+                value: "{{ $root.Values.workload.dataloaderPrefetchFactor }}"
+              - name: SHUFFLE_BUFFER_SIZE
+                value: "{{ $root.Values.workload.shuffleBufferSize }}"
+              - name: ARROW_IO_THREADS
+                value: "{{ $root.Values.workload.arrowIoThreads }}"
+              - name: ARROW_CPU_THREADS
+                value: "{{ $root.Values.workload.arrowCpuThreads }}"
+              - name: REQUIREMENTS
+                value: "{{ $root.Values.workload.requirements }}"
+              {{- if $root.Values.workload.envs }}
+              {{- toYaml .Values.workload.envs | nindent 14 }}
+              {{- end }}
+              - name: PYTHON_MAIN
+                value: "{{ $root.Values.workload.configPath }}{{ $root.Values.workload.configFile }}"
+              command:
+              - bash
+              - -c
+              - |
+                echo "Pod on $(hostname --fqdn) is running"
+                echo "Pod is assigned job index of $JOB_COMPLETION_INDEX"
+                sleep 10
+                bash /workload/launcher/launch-workload.sh
+              volumeMounts:
+                - name: workload-configuration
+                  mountPath: {{ $root.Values.workload.configPath }}
+                - name: workload-launcher
+                  mountPath: /workload/launcher
+                - name: shared-memory
+                  mountPath: /dev/shm
+                {{- if $root.Values.gcsfuse.enabled }}
+                - name: gcsfuse-dataset
+                  mountPath: {{ $root.Values.gcsfuse.mountPathDataset }}
+                - name: gcsfuse-checkpoint
+                  mountPath: {{ $root.Values.gcsfuse.mountPathCheckpoint }}
+                {{- end }}
+                {{- if and $root.Values.lustre.enabled $root.Values.lustre.datasetPvc (ne $root.Values.lustre.datasetPvc "none") }}
+                - name: lustre-dataset
+                  mountPath: {{ $root.Values.lustre.mountPathDataset }}
+                {{- end }}
+                {{- if and $root.Values.lustre.enabled $root.Values.lustre.checkpointPvc (ne $root.Values.lustre.checkpointPvc "none") }}
+                - name: lustre-checkpoint
+                  mountPath: {{ $root.Values.lustre.mountPathCheckpoint }}
+                {{- end }}

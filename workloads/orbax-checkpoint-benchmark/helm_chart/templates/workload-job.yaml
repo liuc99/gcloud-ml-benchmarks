@@ -1,0 +1,134 @@
+# yamllint disable
+{{- $root := . -}}
+{{ $timestamp := now | date "2006-01-02-15-04-05" }}
+{{ $jobuuid := uuidv4 }}
+{{ $nodes := .Values.workload.nodes }}
+
+apiVersion: jobset.x-k8s.io/v1alpha2
+kind: JobSet
+metadata:
+  name: "{{ .Release.Name }}"
+  namespace: default
+spec:
+  failurePolicy:
+    maxRestarts: 0
+  replicatedJobs:
+  - name: workload
+    replicas: 1
+    template:
+      spec:
+        parallelism: {{ $nodes }}
+        completions: {{ $nodes }}
+        backoffLimit: 0
+        completionMode: Indexed
+        ttlSecondsAfterFinished: 43200
+        template:
+          metadata:
+            name: {{ .Release.Name }}
+            annotations:
+              kubectl.kubernetes.io/default-container: workload
+              {{- if $root.Values.gcsfuse.enabled }}
+              gke-gcsfuse/volumes: "true"
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "8080"
+              prometheus.io/path: "/metrics"
+              {{- if $root.Values.gcsfuse.sidecarImage }}
+              gke-gcsfuse/sidecar-image: {{ $root.Values.gcsfuse.sidecarImage | quote }}
+              {{- end }}
+              {{- end }}
+          spec:
+            serviceAccountName: {{ $root.Values.serviceAccount }}
+            subdomain: "{{ .Release.Name }}"
+            restartPolicy: Never
+            {{- if $root.Values.nodeSelector }}
+            nodeSelector:
+              {{- toYaml $root.Values.nodeSelector | nindent 14 }}
+            {{- end }}
+            {{- if $root.Values.workload.singlePodPerNode }}
+            affinity:
+              podAntiAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      jobset.sigs.k8s.io/jobset-name: "{{ .Release.Name }}"
+            {{- end }}
+            volumes:
+            - name: workload-configuration
+              configMap:
+                name: "{{ .Release.Name }}-config"
+                items:
+                - key: workload-configuration
+                  path: orbax_checkpoint_bench.py
+                - key: requirements.txt
+                  path: requirements.txt
+            - name: workload-launcher
+              configMap:
+                name: "{{ .Release.Name }}-launcher"
+                defaultMode: 0755
+            {{- if $root.Values.gcsfuse.enabled }}
+            - name: gcsfuse-checkpoint
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                volumeAttributes:
+                  bucketName: "{{ $root.Values.gcsfuse.checkpointBucket }}"
+                  mountOptions: "{{ $root.Values.gcsfuse.mountOptions }}"
+            {{- end }}
+            containers:
+            - name: workload
+              image: "{{ $root.Values.workload.image }}"
+              imagePullPolicy: Always
+              command: ["/bin/bash", "/workload/launcher/launch-workload.sh"]
+              env:
+              - name: JOB_TIMESTAMP
+                value: "{{ $timestamp }}"
+              - name: JOB_COMPLETION_INDEX
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+              - name: NODE_RANK
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+              - name: NNODES
+                value: "{{ $nodes }}"
+              - name: CKPT_WRITE_PATH
+                value: "{{ $root.Values.gcsfs.ckptWritePath }}"
+              - name: REQUIREMENTS
+                value: "{{ $root.Values.workload.requirements }}"
+              - name: BENCHMARK_MODE
+                value: "{{ $root.Values.workload.benchmarkMode }}"
+              - name: SRC_SHARDS
+                value: "{{ $root.Values.workload.srcShards }}"
+              - name: DST_WORKERS
+                value: "{{ $root.Values.workload.dstWorkers }}"
+              - name: NUM_LAYERS
+                value: "{{ $root.Values.workload.numLayers }}"
+              - name: HIDDEN_DIM
+                value: "{{ $root.Values.workload.hiddenDim }}"
+              - name: STRATEGY
+                value: "{{ $root.Values.workload.strategy }}"
+              - name: DIM_PARTITIONS
+                value: "{{ $root.Values.workload.dimPartitions }}"
+              - name: TARGET_CHUNK_MB
+                value: "{{ $root.Values.workload.targetChunkMb }}"
+              - name: STRIP_OPT_STATE
+                value: "{{ $root.Values.workload.stripOptState }}"
+              - name: CAST_DTYPE
+                value: "{{ $root.Values.workload.castDtype }}"
+              - name: NUM_RUNS
+                value: "{{ $root.Values.workload.numRuns }}"
+              - name: CHECKPOINT_BUCKET
+                value: "{{ $root.Values.gcsfuse.checkpointBucket }}"
+              volumeMounts:
+              - name: workload-configuration
+                mountPath: /workload/configs
+              - name: workload-configuration
+                mountPath: /workload/orbax_checkpoint_bench.py
+                subPath: orbax_checkpoint_bench.py
+              - name: workload-launcher
+                mountPath: /workload/launcher
+              {{- if $root.Values.gcsfuse.enabled }}
+              - name: gcsfuse-checkpoint
+                mountPath: {{ $root.Values.gcsfuse.mountPathCheckpoint }}
+              {{- end }}

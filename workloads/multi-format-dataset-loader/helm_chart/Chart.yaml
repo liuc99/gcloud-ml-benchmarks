@@ -1,0 +1,6 @@
+apiVersion: v2
+name: multi-format-dataset-loader
+description: A Helm chart for running ML dataset loading benchmarks & demos on GKE over GCSFuse, gcsfs, or Lustre.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

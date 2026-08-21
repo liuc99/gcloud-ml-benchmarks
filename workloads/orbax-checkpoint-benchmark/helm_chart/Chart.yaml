@@ -1,0 +1,6 @@
+apiVersion: v2
+name: orbax-checkpoint-benchmark
+description: Orbax Checkpoint Offline Resharding and Restore Performance Benchmark Workload on GKE & GCS.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

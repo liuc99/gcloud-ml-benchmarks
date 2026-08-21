@@ -1,0 +1,6 @@
+apiVersion: v2
+name: maxtext-dataset-loader
+description: Helm chart for MaxText dataset loading benchmark on GKE (supporting Parquet Range Reads, ArrayRecord streaming, and Native In-Tree DataLoader).
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

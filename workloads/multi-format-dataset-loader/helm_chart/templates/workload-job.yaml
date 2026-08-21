@@ -1,0 +1,126 @@
+# yamllint disable
+{{- $root := . -}}
+{{ $timestamp := now | date "2006-01-02-15-04-05" }}
+{{ $nodes := .Values.workload.nodes }}
+
+apiVersion: jobset.x-k8s.io/v1alpha2
+kind: JobSet
+metadata:
+  name: "{{ .Release.Name }}"
+  namespace: default
+spec:
+  failurePolicy:
+    maxRestarts: 0
+  replicatedJobs:
+  - name: workload
+    replicas: 1
+    template:
+      spec:
+        parallelism: {{ $nodes }}
+        completions: {{ $nodes }}
+        backoffLimit: 0
+        completionMode: Indexed
+        ttlSecondsAfterFinished: 43200
+        template:
+          metadata:
+            name: {{ .Release.Name }}
+            annotations:
+              kubectl.kubernetes.io/default-container: workload
+              {{- if $root.Values.gcsfuse.enabled }}
+              gke-gcsfuse/volumes: "true"
+              {{- end }}
+          spec:
+            serviceAccountName: {{ $root.Values.serviceAccount | default "default" }}
+            subdomain: "{{ .Release.Name }}"
+            restartPolicy: Never
+            {{- if $root.Values.nodeSelector }}
+            nodeSelector:
+              {{- toYaml $root.Values.nodeSelector | nindent 14 }}
+            {{- end }}
+            volumes:
+            - name: workload-configuration
+              configMap:
+                name: "{{ .Release.Name }}-config"
+            - name: workload-launcher
+              configMap:
+                name: "{{ .Release.Name }}-launcher"
+                defaultMode: 0755
+            {{- if $root.Values.gcsfuse.enabled }}
+            - name: gcsfuse-dataset
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                volumeAttributes:
+                  bucketName: "{{ $root.Values.gcsfuse.datasetBucket }}"
+                  mountOptions: "{{ $root.Values.gcsfuse.mountOptions }}"
+            {{- end }}
+            {{- if $root.Values.lustre.enabled }}
+            - name: lustre-volume
+              persistentVolumeClaim:
+                claimName: "{{ $root.Values.lustre.checkpointPvc }}"
+            {{- end }}
+            containers:
+            - name: workload
+              image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+              imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+              command: ["/bin/bash", "/workload/launcher/launcher.sh"]
+              env:
+              - name: RANK
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+              - name: WORLD_SIZE
+                value: "{{ $nodes }}"
+              - name: DATASET_PATH
+                value: "{{ $root.Values.gcsfs.datasetPath }}"
+              - name: FORMAT
+                value: "{{ $root.Values.workload.format }}"
+              - name: READER
+                value: "{{ $root.Values.workload.reader }}"
+              - name: BATCH_SIZE
+                value: "{{ $root.Values.workload.batchSize }}"
+              - name: NUM_WORKERS
+                value: "{{ $root.Values.workload.numWorkers }}"
+              - name: PREFETCH_FACTOR
+                value: "{{ $root.Values.workload.prefetchFactor }}"
+              - name: MAX_BATCHES
+                value: "{{ $root.Values.workload.maxBatches }}"
+              - name: EPOCHS
+                value: "{{ $root.Values.workload.epochs }}"
+              - name: GENERATE_DATASET
+                value: "{{ $root.Values.workload.generateDataset }}"
+              - name: USE_MANIFEST
+                value: "{{ $root.Values.workload.useManifest }}"
+              - name: SHUFFLE_STRATEGY
+                value: "{{ $root.Values.workload.shuffleStrategy }}"
+              - name: BUFFER_SIZE
+                value: "{{ $root.Values.workload.bufferSize | default 10000 }}"
+              - name: SEED
+                value: "{{ $root.Values.workload.seed | default 42 }}"
+              - name: DATASET_SIZE_MB
+                value: "{{ $root.Values.workload.datasetSizeMb }}"
+              - name: NUM_FILES
+                value: "{{ $root.Values.workload.numFiles }}"
+              - name: SEQUENCE_LENGTH
+                value: "{{ $root.Values.workload.sequenceLength }}"
+              - name: EMBEDDING_DIM
+                value: "{{ $root.Values.workload.embeddingDim }}"
+              volumeMounts:
+              - name: workload-configuration
+                mountPath: /workload/dataset_loading_bench.py
+                subPath: dataset_loading_bench.py
+              - name: workload-configuration
+                mountPath: /workload/dataset_generator.py
+                subPath: dataset_generator.py
+              - name: workload-configuration
+                mountPath: /workload/requirements.txt
+                subPath: requirements.txt
+              - name: workload-launcher
+                mountPath: /workload/launcher
+              {{- if $root.Values.gcsfuse.enabled }}
+              - name: gcsfuse-dataset
+                mountPath: /gcs/dataset
+              {{- end }}
+              {{- if $root.Values.lustre.enabled }}
+              - name: lustre-volume
+                mountPath: /lustre
+              {{- end }}

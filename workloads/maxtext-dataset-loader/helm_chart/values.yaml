@@ -1,0 +1,49 @@
+workload:
+  nodes: 1
+  loaderMode: "storage_bench"   # choices: "storage_bench" (custom range read/IO micro-bench) or "in_tree_loader" (MaxText in-tree standalone_dataloader)
+  accessMode: "gcsfuse"         # choices: "gcsfuse" or "native_gcs"
+  shuffleMode: "two_stage"      # choices: "none", "two_stage", "global"
+  shuffleBufferSize: 20000      # in-memory sliding window shuffle buffer capacity (samples)
+  datasetFormat: "arrayrecord"  # choices: "parquet" or "arrayrecord"
+  convertToArrayRecord: false   # set to true to run Parquet->ArrayRecord converter first
+  columns: "input_ids,label"
+  batchSize: 128
+  maxBatches: 500
+  numThreads: 8
+  numStreams: 8
+  chunkRecords: 1               # number of consecutive records per Range Read chunk (e.g. 1=8KB, 8=64KB, 32=256KB, 64=512KB)
+  generateDataset: false
+  datasetSizeMb: 1024
+  numFiles: 10
+  sequenceLength: 2048
+  metadataBytes: 4096
+
+  # Settings for in_tree_loader mode (standalone_dataloader.py)
+  inTreeLoader:
+    configPath: "src/maxtext/configs/base.yml"
+    runName: "maxtext_in_tree_bench"
+    datasetType: "grain_array_record"    # "synthetic", "grain_array_record", "grain_parquet", "tfds", "c4_mlperf"
+    hardware: "cpu"                      # "cpu", "tpu", "gpu"
+
+gcsfs:
+  datasetPath: "/gcs/dataset"
+
+gcsfuse:
+  enabled: false
+  datasetBucket: ""
+  # Profile options: "" / "none" (custom mountOptions inline), "training" (gcsfusecsi-training), "checkpointing" (gcsfusecsi-checkpointing), "serving" (gcsfusecsi-serving)
+  profile: ""
+  onlyDir: ""
+  mountOptions: "implicit-dirs,file-cache:max-size-mb:-1,file-cache:cache-file-for-range-read:true"
+
+lustre:
+  enabled: false
+  checkpointPvc: "lustre-checkpoint-pvc"
+
+image:
+  repository: "python"
+  tag: "3.11-slim"
+  pullPolicy: "IfNotPresent"
+
+nodeSelector:
+  cloud.google.com/gke-nodepool: default-pool

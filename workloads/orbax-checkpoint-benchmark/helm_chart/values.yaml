@@ -1,0 +1,53 @@
+# Default values for Orbax Checkpoint Resharding & Restore Benchmark Workload.
+
+nodeSelector:
+  cloud.google.com/gke-nodepool: n4-standard-80
+
+serviceAccount: default
+namespace: default
+workload_launcher: launcher.sh
+
+workload:
+  configFile: orbax_checkpoint_bench.py
+  configPath: /workload/
+  image: python:3.11-slim
+  nodes: 1
+  ranksPerNode: 1
+  singlePodPerNode: true
+  requirements: ""
+  numWorkers: 16
+  benchmarkMode: "compare" # "compare", "generate", "rewrite", "restore"
+  srcShards: 5
+  dstWorkers: 10
+  numLayers: 16
+  hiddenDim: 16384
+  strategy: "dim_partitions" # "dim_partitions" or "optimal_size"
+  dimPartitions: "0:10"
+  targetChunkMb: 64.0
+  stripOptState: false
+  castDtype: "keep" # "keep", "bfloat16", "float16", "float32"
+  numRuns: 3
+  envs:
+    - name: LOG_LEVEL
+      value: INFO
+
+gcsfs:
+  datasetPath: ""
+  ckptWritePath: ""
+  ckptLoadPath: ""
+
+gcsfuse:
+  enabled: true
+  datasetBucket: ""
+  checkpointBucket: ""
+  mountPathDataset: "/gcs/dataset"
+  mountPathCheckpoint: "/gcs/checkpoints"
+  mountOptions: "implicit-dirs"
+  sidecarImage: ""
+
+lustre:
+  enabled: false
+  datasetPvc: ""
+  checkpointPvc: ""
+  mountPathDataset: "/lustre/dataset"
+  mountPathCheckpoint: "/lustre/checkpoints"

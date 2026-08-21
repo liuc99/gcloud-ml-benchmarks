@@ -1,0 +1,11 @@
+=== ML Dataset Loading Benchmark: Parquet Format via GCSFuse CSI ===
+[CONFIG] Format: parquet, Reader: hf_datasets, BatchSize: 64, NumWorkers: 4
+[LOADER] Dataset loaded from /gcs/dataset
+[METRIC] Time to First Batch TTFB : 7280.0 ms
+[METRIC] Total Batches Read       : 100 batches
+[METRIC] Total Samples Read       : 6400 samples
+[METRIC] Total Time Elapsed       : 1.95 seconds
+[METRIC] Read Throughput          : 25.68 MB/s
+[METRIC] Ingestion Speed          : 3287.0 samples/sec
+[METRIC] Batch Latency p50 / p95  : 23.76 ms / 39.97 ms
+=== Evaluation Completed ===

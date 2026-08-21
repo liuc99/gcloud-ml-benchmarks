@@ -1,0 +1,17 @@
+=== Training Benchmark Logs: PyTorch Lightning Llama 3.1 8B DDP Simulation ===
+[INIT] Initializing 8 ranks across 2 nodes (c4-standard-192)
+[DATASET] Loading dataset from /gcs/dataset
+[DATASET] HF dataloader prepared in 0.8983s
+[DATASET] _PrefetchDataFetcher.__iter__ (Worker Spawn and Data Loading) took 20.7100 seconds
+[BENCHMARK] Global Rank: 0 | Step: 1 | Loss: 0.1234 | Step Time: 0.0480s | Throughput: 333.33 samples/s
+[BENCHMARK] Global Rank: 0 | Step: 2 | Loss: 0.1230 | Step Time: 0.0450s | Throughput: 355.56 samples/s
+[BENCHMARK] Global Rank: 0 | Step: 3 | Loss: 0.1225 | Step Time: 0.0425s | Throughput: 376.47 samples/s
+[BENCHMARK] Global Rank: 0 | Step: 4 | Loss: 0.1220 | Step Time: 0.0430s | Throughput: 372.09 samples/s
+[BENCHMARK] Global Rank: 0 | Step: 5 | Loss: 0.1215 | Step Time: 0.0420s | Throughput: 380.95 samples/s
+[BENCHMARK] Finished saving checkpoint (Writer Rank 0) to /gcs/checkpoints/step-25.ckpt in 108.34 seconds (Upload Time: 108.34 seconds) for global_step 25 from rank 0 (Size: 48177583616 bytes / 45945.74 MB / 44.87 GB, Network Upload Throughput: 447.31 MB/s / 0.44 GB/s, Overall Throughput: 426.43 MB/s / 0.42 GB/s)
+[BENCHMARK] Aggregated Checkpoint Save Complete : Step : 25 : Total Size : 48177583616 bytes (45945.74 MB / 44.87 GB) : Total Duration : 108.34 seconds : Aggregated Throughput : 426.43 MB/s
+[BENCHMARK] Finished deleting old checkpoint from /gcs/checkpoints/step-0.ckpt in 2.370 seconds
+[BENCHMARK] Global Rank: 0 | Step: 26 | Loss: 0.1190 | Step Time: 0.0440s | Throughput: 363.64 samples/s
+[BENCHMARK] Finished saving checkpoint (Writer Rank 0) to /gcs/checkpoints/step-50.ckpt in 105.10 seconds (Upload Time: 105.10 seconds) for global_step 50 from rank 0 (Size: 48177583616 bytes / 45945.74 MB / 44.87 GB, Network Upload Throughput: 452.10 MB/s / 0.44 GB/s, Overall Throughput: 430.20 MB/s / 0.42 GB/s)
+[BENCHMARK] Aggregated Checkpoint Save Complete : Step : 50 : Total Size : 48177583616 bytes (45945.74 MB / 44.87 GB) : Total Duration : 105.10 seconds : Aggregated Throughput : 430.20 MB/s
+=== Benchmark Completed Successfully ===

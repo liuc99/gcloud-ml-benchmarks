@@ -1,0 +1,348 @@
+"""HF Llama benchmark log parser.
+
+The 8 regex constants below match the log lines emitted by
+``llama_3_1_8b_cpu_sim.py``. parse_entries matches/pairs them over an
+injectable iterable of LogEntry, so it is unit-testable without a Cloud
+Logging client.
+"""
+
+import argparse
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, List
+
+from metrics import raw_store, schema
+
+# --- regexes -----------------------------------------------------------
+STEP_METRICS_PATTERN = (
+    r"(?:\[BENCHMARK\]\s+)?Global Rank: 0 \| Step: ([0-9]+) \| Loss: [0-9.]+ \| "
+    r"Step Time: ([0-9.]+)s \| Throughput: ([0-9.]+) samples/s"
+)
+CHECKPOINT_START_PATTERN = (
+    r"(?:\[BENCHMARK\]\s+)?Checkpoint Save(?:\s*\([^)]+\))?\s*: Rank: ([0-9]+) : Step: ([0-9]+) : "
+    r"Start time: ([0-9.]+) seconds: Path: (.*)"
+)
+CHECKPOINT_END_PATTERN = (
+    r"(?:\[BENCHMARK\]\s+)?Finished saving checkpoint(?:\s*\([^)]+\))?\s+to (.*) in ([0-9.]+) seconds "
+    r"(?:\(Upload Time: [0-9.]+ seconds\)\s+)?for global_step ([0-9]+)\s+from rank ([0-9]+)"
+)
+CHECKPOINT_RESTORE_START_PATTERN = (
+    r"(?:\[BENCHMARK\]\s+)?Checkpoint Restore Start : Rank : ([0-9]+) : "
+    r"Start time: ([0-9.]+) seconds : Path: (.*)"
+)
+CHECKPOINT_RESTORE_END_PATTERN = (
+    r"(?:\[BENCHMARK\]\s+)?Finished restoring checkpoint : Rank : ([0-9]+) : "
+    r"Duration: ([0-9.]+) seconds : End Time: ([0-9.]+) seconds : "
+    r"Path: (.*)"
+)
+CHECKPOINT_DELETE_PATTERN = (
+    r"(?:\[BENCHMARK\]\s+)?Finished deleting checkpoint(?:\s*\([^)]+\))?\s+(.*) in ([0-9.]+) seconds for "
+    r"global_step ([0-9]+) from rank ([0-9]+)"
+)
+ACCELERATOR_BLOCKED_TIME_PATTERN = (
+    r"\[_TrainingEpochLoop\]\.train_dataloader_next\s+"
+    r"(?:\|\s+[\d\.]+\s+){2}\|\s+([\d\.]+)\s+\|\s+([\d\.]+)\s+\|"
+)
+
+CHECKPOINT_SIZE_PATTERN = (
+    r"(?:\[BENCHMARK\]\s+)?Checkpoint Size : Rank : ([0-9]+) : Step : ([0-9]+) : "
+    r"Bytes : ([0-9]+) : Path: (.*)"
+)
+
+ALL_PATTERNS = [
+    STEP_METRICS_PATTERN,
+    CHECKPOINT_START_PATTERN,
+    CHECKPOINT_END_PATTERN,
+    CHECKPOINT_RESTORE_START_PATTERN,
+    CHECKPOINT_RESTORE_END_PATTERN,
+    CHECKPOINT_DELETE_PATTERN,
+    ACCELERATOR_BLOCKED_TIME_PATTERN,
+    CHECKPOINT_SIZE_PATTERN,
+]
+
+
+@dataclass
+class LogEntry:
+    timestamp: float  # epoch seconds
+    message: str
+
+
+@dataclass
+class ParsedRawMetrics:
+    step_metrics: List[schema.StepMetrics] = field(default_factory=list)
+    write_metrics: Dict[int, List[schema.WriteDurationMetrics]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    restore_metrics: Dict[int, List[schema.RestoreDurationMetrics]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    delete_metrics: Dict[int, List[schema.DeleteDurationMetrics]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    data_loading_metrics: List[schema.DataLoadingMetrics] = field(default_factory=list)
+    checkpoint_sizes: List[schema.CheckpointSizeMetrics] = field(default_factory=list)
+
+
+def parse_entries(
+    entries: Iterable[LogEntry], *, run_id: str, checkpoint_location: str
+) -> ParsedRawMetrics:
+    """Scrape raw metrics from log entries."""
+    out = ParsedRawMetrics()
+    checkpoint_starts = {}  # (step, rank) -> {start_time, path}
+    restore_starts = {}  # rank -> {start_time, path}
+
+    for entry in entries:
+        message = entry.message
+        if not message:
+            continue
+        ts = entry.timestamp
+
+        m = re.search(STEP_METRICS_PATTERN, message)
+        if m:
+            try:
+                out.step_metrics.append(
+                    schema.StepMetrics(
+                        step=int(m.group(1)),
+                        step_duration=float(m.group(2)),
+                        step_end_time=ts,
+                        samples_per_second=float(m.group(3)),
+                    )
+                )
+            except (ValueError, IndexError):
+                print(f"Warning: Could not parse step metrics from: {message}")
+
+        m = re.search(CHECKPOINT_START_PATTERN, message)
+        if m:
+            rank = int(m.group(1))
+            step = int(m.group(2))
+            start_time = float(m.group(3))
+            path = m.group(4)
+            checkpoint_starts[(step, rank, path)] = {
+                "start_time": start_time,
+                "path": path,
+            }
+
+        m = re.search(CHECKPOINT_END_PATTERN, message)
+        if m:
+            path = m.group(1)
+            duration = float(m.group(2))
+            step = int(m.group(3))
+            rank = int(m.group(4))
+            key = (step, rank, path)
+            if key in checkpoint_starts:
+                start_info = checkpoint_starts[key]
+                start_time = start_info["start_time"]
+                out.write_metrics[rank].append(
+                    schema.WriteDurationMetrics(
+                        global_rank=rank,
+                        checkpoint_location=path,
+                        checkpoint_step=step,
+                        start_time=start_time,
+                        end_time=start_time + duration,
+                    )
+                )
+                del checkpoint_starts[key]
+
+        m = re.search(CHECKPOINT_DELETE_PATTERN, message)
+        if m:
+            step = int(m.group(3))
+            rank = int(m.group(4))
+            if rank == 0:
+                # Delete logs no absolute start; anchor end_time to the log's
+                # Cloud Logging timestamp and back out start from the duration.
+                duration = float(m.group(2))
+                end_time = ts
+                out.delete_metrics[rank].append(
+                    schema.DeleteDurationMetrics(
+                        global_rank=rank,
+                        checkpoint_location=checkpoint_location,
+                        checkpoint_step=step,
+                        start_time=end_time - duration,
+                        end_time=end_time,
+                    )
+                )
+
+        m = re.search(CHECKPOINT_RESTORE_START_PATTERN, message)
+        if m:
+            rank = int(m.group(1))
+            if rank not in restore_starts:
+                restore_starts[rank] = {
+                    "start_time": float(m.group(2)),
+                    "path": m.group(3),
+                }
+
+        m = re.search(CHECKPOINT_RESTORE_END_PATTERN, message)
+        if m:
+            rank = int(m.group(1))
+            if rank in restore_starts:
+                start_info = restore_starts[rank]
+                # Key each restore by the checkpoint path it loaded (captured at
+                # the paired start), not the run-wide checkpoint_location. Under
+                # DDP every rank restores the same path, so calc_restore_metrics
+                # collapses all ranks into one distributed datapoint (max end -
+                # min start); two distinct restores keep separate paths and stay
+                # separate datapoints instead of merging into one inflated span.
+                # Both the start ("Start time") and end ("End Time") are
+                # wall-clock timestamps from the workload, so the cross-rank span
+                # is valid across nodes.
+                out.restore_metrics[rank].append(
+                    schema.RestoreDurationMetrics(
+                        checkpoint_step=0,
+                        global_rank=rank,
+                        checkpoint_location=start_info["path"],
+                        start_time=start_info["start_time"],
+                        end_time=float(m.group(3)),
+                    )
+                )
+                del restore_starts[rank]
+
+        m = re.search(ACCELERATOR_BLOCKED_TIME_PATTERN, message)
+        if m:
+            try:
+                out.data_loading_metrics.append(
+                    schema.DataLoadingMetrics(
+                        run_id=run_id,
+                        epoch_idx=-1,
+                        accelerator_blocked_time=float(m.group(1)),
+                        accelerator_blocked_percent=float(m.group(2)),
+                        update_timestamp=None,
+                    )
+                )
+            except (ValueError, IndexError):
+                print(
+                    "Warning: Could not parse accelerator blocked time "
+                    f"metrics from: {message}"
+                )
+
+        m = re.search(CHECKPOINT_SIZE_PATTERN, message)
+        if m:
+            try:
+                out.checkpoint_sizes.append(
+                    schema.CheckpointSizeMetrics(
+                        global_rank=int(m.group(1)),
+                        checkpoint_step=int(m.group(2)),
+                        size_bytes=int(m.group(3)),
+                        checkpoint_location=m.group(4),
+                    )
+                )
+            except (ValueError, IndexError):
+                print(f"Warning: Could not parse checkpoint size from: {message}")
+
+    return out
+
+
+_MAX_PAGE_SIZE = 1000
+
+
+def _default_read_retry():
+    from google.api_core import exceptions as gexc
+    from google.api_core import retry as retries
+
+    return retries.Retry(
+        predicate=retries.if_exception_type(gexc.ResourceExhausted),
+        initial=2.0,
+        maximum=60.0,
+        multiplier=2.0,
+        deadline=180.0,
+    )
+
+
+def _to_log_entry(entry) -> LogEntry:
+    payload = entry.text_payload or (
+        dict(entry.json_payload) if entry.json_payload else ""
+    )
+    message = (
+        payload
+        if isinstance(payload, str)
+        else (payload.get("message", "") if payload else "")
+    )
+    return LogEntry(timestamp=entry.timestamp.timestamp(), message=message)
+
+
+def iter_log_entries(
+    client,
+    project: str,
+    filter_string: str,
+    *,
+    page_size: int = _MAX_PAGE_SIZE,
+    retry=None,
+) -> Iterable[LogEntry]:
+    if retry is None:
+        retry = _default_read_retry()
+
+    def _fetch(token):
+        request = {
+            "resource_names": [f"projects/{project}"],
+            "filter": filter_string,
+            "order_by": "timestamp asc",
+            "page_size": page_size,
+            "page_token": token,
+        }
+        pager = client.list_log_entries(request=request)
+        page = next(pager.pages, None)
+        if page is None:
+            return None, None
+        return page.entries, page.next_page_token
+
+    page_token = None
+    while True:
+        page, page_token = retry(_fetch)(page_token)
+        if page is None:
+            return
+        for entry in page:
+            yield _to_log_entry(entry)
+        if not page_token:
+            return
+
+
+def build_filter(*, project: str, run_id: str, start_time: str, end_time: str) -> str:
+    """Cloud Logging filter matching the patterns in ``ALL_PATTERNS``."""
+    regex_or = " OR ".join(f'textPayload =~ "{p}"' for p in ALL_PATTERNS)
+    return (
+        'resource.type="k8s_container" '
+        f'resource.labels.project_id="{project}" '
+        f'resource.labels.pod_name:"{run_id}-workload-0-" '
+        "severity>=DEFAULT "
+        f'timestamp>="{start_time}" '
+        f'timestamp<="{end_time}" '
+        f"AND ({regex_or})"
+    )
+
+
+def main(argv=None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Scrape HF benchmark metrics " "from Cloud Logging into raw CSVs."
+    )
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--start-time", required=True, help="RFC3339")
+    parser.add_argument("--end-time", required=True, help="RFC3339")
+    parser.add_argument("--checkpoint-location", required=True)
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--run-type", default="perf_optimization")
+    args = parser.parse_args(argv)
+
+    from google.cloud.logging_v2.services.logging_service_v2 import (
+        LoggingServiceV2Client,
+    )
+
+    client = LoggingServiceV2Client()
+    filter_string = build_filter(
+        project=args.project,
+        run_id=args.run_id,
+        start_time=args.start_time,
+        end_time=args.end_time,
+    )
+
+    parsed = parse_entries(
+        iter_log_entries(client, args.project, filter_string),
+        run_id=args.run_id,
+        checkpoint_location=args.checkpoint_location,
+    )
+    raw_store.write_raw_metrics(parsed, args.out_dir, run_type=args.run_type)
+    print(f"Wrote raw metrics to {args.out_dir}")
+
+
+if __name__ == "__main__":
+    main()

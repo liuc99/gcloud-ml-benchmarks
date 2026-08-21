@@ -1,0 +1,20 @@
+# Workload deps for the CPU emulator, installed by launcher.sh at pod start
+# when the workload image doesn't already ship them. Also the canonical list
+# to bake into a custom pre-built image if you want to skip that install.
+#
+# Notes:
+#   - torch is intentionally NOT here. It must come from PyTorch's CPU index
+#     (the default PyPI wheel pulls the CUDA variant which is ~2 GB and won't
+#     import without libcuda). Install it explicitly with
+#       pip install --index-url https://download.pytorch.org/whl/cpu torch
+#     before installing -r requirements.txt.
+#   - transformers pinned so tokenizer/model loading behavior is deterministic
+#     across runs.
+datasets
+fsspec
+gcsfs
+lightning>=2.0
+psutil
+pyarrow
+transformers==4.46.3
+tensorstore

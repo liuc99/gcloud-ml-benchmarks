@@ -1,0 +1,48 @@
+{{- if and .Values.gcsfuse.enabled (and .Values.gcsfuse.profile (ne .Values.gcsfuse.profile "none") (ne .Values.gcsfuse.profile "")) }}
+{{- $scName := "" }}
+{{- if eq .Values.gcsfuse.profile "training" }}
+  {{- $scName = "gcsfusecsi-training" }}
+{{- else if eq .Values.gcsfuse.profile "checkpointing" }}
+  {{- $scName = "gcsfusecsi-checkpointing" }}
+{{- else if eq .Values.gcsfuse.profile "serving" }}
+  {{- $scName = "gcsfusecsi-serving" }}
+{{- else }}
+  {{- $scName = .Values.gcsfuse.profile }}
+{{- end }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Release.Name }}-gcsfuse-pv
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  accessModes:
+  - ReadWriteMany
+  capacity:
+    storage: 5Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: {{ $scName }}
+  {{- if .Values.gcsfuse.onlyDir }}
+  mountOptions:
+  - only-dir={{ .Values.gcsfuse.onlyDir }}
+  {{- end }}
+  csi:
+    driver: gcsfuse.csi.storage.gke.io
+    volumeHandle: "{{ .Values.gcsfuse.datasetBucket }}"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-gcsfuse-pvc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+  volumeName: {{ .Release.Name }}-gcsfuse-pv
+  storageClassName: {{ $scName }}
+{{- end }}

@@ -1,0 +1,13 @@
+=== MaxText Dataset Loading Benchmark: ArrayRecord with gcsfusecsi-training Profile ===
+[CONFIG] Format: arrayrecord, Mode: in_tree_loader, Shuffle: two_stage, BatchSize: 128
+[METRIC] Shard Index Discovery Time : 235.4 ms (1650 shards discovered from manifest.json)
+[METRIC] Time to First Batch TTFB : 2810.0 ms
+[METRIC] Processed Batches        : 500 batches
+[METRIC] Total Samples Ingested   : 64000 samples
+[METRIC] Elapsed Read Time        : 13.09 seconds
+[METRIC] Read Throughput          : 38.19 MB/s
+[METRIC] Ingestion Speed          : 4888.0 samples/sec
+[METRIC] Batch Latency p50 / p95  : 19.57 ms / 33.83 ms
+[METRIC] Step 1 Cold Start Ratio  : 21.46 %
+[METRIC] CPU Tokenizer Overhead   : 0.00 ms (0.00 %)
+=== Benchmark Finished Successfully ===
